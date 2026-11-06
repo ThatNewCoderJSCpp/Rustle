@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Rustle
+GenericName=Soundboard and Voice Changer
+Comment=Play sounds and change your voice in Discord, OBS and games
+Exec=rustle
+Icon=rustle
+Terminal=false
+Categories=AudioVideo;Audio;
+Keywords=soundboard;voice changer;microphone;discord;obs;
+StartupWMClass=rustle

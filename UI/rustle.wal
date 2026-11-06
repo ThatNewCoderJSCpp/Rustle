@@ -1,0 +1,2057 @@
+import module.grove
+import module.strings
+import module.io
+
+string: cur_folder = "";
+string: view_mode = "folder";
+string: query_text = "";
+string: parent_folder = "";
+string: lib_rev = "";
+string: notice_seq = "0";
+short float: notice_time = 0.0;
+string: edit_path = "";
+short float: edit_duration = 0.0;
+string: key_target = "";
+string: active_list = "";
+string: view_kind = "tiles";
+bool: voice_built = false;
+string: fb_path = "";
+string: fb_selected = "";
+bool: filling = false;
+string: route_vmic = "";
+bool: edit_open = false;
+
+function call(const string&: name, const string&: arg) -> string;
+function el(const string&: tag, const string&: cls, const string&: label) -> grove::Element;
+function clear(grove::Element&: e) -> void;
+function tab2(const string&: a, const string&: b) -> string;
+function tab3(const string&: a, const string&: b, const string&: c) -> string;
+function show(const string&: id, bool: on) -> void;
+function set_text(const string&: id, const string&: msg) -> void;
+function failed(const string&: result) -> bool;
+function reason(const string&: result) -> string;
+function fmt(const string&: value, const string&: decimals) -> string;
+function to_float(const string&: s) -> short float;
+function flag(bool: on) -> string;
+function setting(const string&: source, const string&: key) -> string;
+function toast(const string&: kind, const string&: msg) -> void;
+function update_notices() -> void;
+function build_board() -> void;
+function add_crumb(grove::Element&: box, const string&: label, const string&: path, bool: last) -> void;
+function folder_card(const string&: path, const string&: name, const string&: sounds, const string&: folders) -> grove::Element;
+function sound_tile(long int: index, const string&: line) -> grove::Element;
+function sound_row(long int: index, const string&: line) -> grove::Element;
+function enter_folder(const string&: path) -> void;
+function set_mode(const string&: mode) -> void;
+function update_states() -> void;
+function clear_state(const string&: idx) -> void;
+function update_meters() -> void;
+function set_meter(const string&: id, const string&: pct) -> void;
+function update_mic_button(const string&: open, const string&: ptt, const string&: talking, const string&: enabled) -> void;
+function check_library() -> void;
+function build_voice() -> void;
+function add_voice_control(grove::Element&: card, const string&: slot, const string&: line) -> void;
+function refresh_voice() -> void;
+function fill_presets() -> void;
+function voice_value_changed(const string&: control, const string&: value) -> void;
+function load_output() -> void;
+function fill_devices(const string&: select_id, const string&: kind, const string&: current, const string&: auto_label, bool: with_none) -> void;
+function update_route() -> void;
+function set_dot(const string&: id, const string&: state) -> void;
+function open_dir(const string&: path) -> void;
+function fill_places() -> void;
+function fill_targets() -> void;
+function toggle_selected(const string&: path, bool: on) -> void;
+function selected_count() -> long int;
+function load_settings_page() -> void;
+function fill_roots() -> void;
+function fill_sound_keys() -> void;
+function update_hotkeys() -> void;
+function open_edit(const string&: path) -> void;
+function edit_field(const string&: key) -> void;
+function edit_reset_field(const string&: key, const string&: value) -> void;
+function open_key_capture(const string&: target, const string&: label) -> void;
+function chord_of(grove::Event&: e) -> string;
+function modifier(const string&: key) -> bool;
+function typing_target(grove::Event&: e) -> bool;
+function key_label(const string&: chord) -> string;
+function apply_captured(const string&: chord) -> void;
+function update_vmic_pill() -> void;
+function search_changed(const string&: typed) -> void;
+
+function call(const string&: name, const string&: arg) -> string {
+    return grove::call("rustle." + name, arg);
+} end function call
+
+function el(const string&: tag, const string&: cls, const string&: label) -> grove::Element {
+    grove::Element: e = grove::create_element(tag);
+    if (!cls.empty()) then {
+        e.set_attribute("class", cls);
+    }
+    if (!label.empty()) then {
+        e.set_inner_text(label);
+    }
+    return e;
+} end function el
+
+function clear(grove::Element&: e) -> void {
+    while (e.child_count() > 0l) {
+        e.child(0l).remove();
+    }
+} end function clear
+
+function tab2(const string&: a, const string&: b) -> string {
+    return a + "\t" + b;
+} end function tab2
+
+function tab3(const string&: a, const string&: b, const string&: c) -> string {
+    return a + "\t" + b + "\t" + c;
+} end function tab3
+
+function show(const string&: id, bool: on) -> void {
+    grove::Element: e = grove::get_by_id(id);
+    if (on) then {
+        e.remove_class("hidden");
+    } else then {
+        e.add_class("hidden");
+    }
+} end function show
+
+function set_text(const string&: id, const string&: msg) -> void {
+    grove::get_by_id(id).set_inner_text(msg);
+} end function set_text
+
+function failed(const string&: result) -> bool {
+    return result.starts_with("error");
+} end function failed
+
+function reason(const string&: result) -> string {
+    auto: f = result.split("\t");
+    if (f.size() > 1l) then {
+        return f[1];
+    }
+    return result;
+} end function reason
+
+function fmt(const string&: value, const string&: decimals) -> string {
+    return call("fmt", tab2(value, decimals));
+} end function fmt
+
+function to_float(const string&: s) -> short float {
+    if (s.empty()) then {
+        return 0.0;
+    }
+    return std::io::parse_float<short float>(s);
+} end function to_float
+
+function flag(bool: on) -> string {
+    if (on) then {
+        return "1";
+    }
+    return "0";
+} end function flag
+
+function setting(const string&: source, const string&: key) -> string {
+    auto: rows = source.split("\n");
+    for (long int: i = 0l; i < rows.size(); i += 1l) {
+        auto: f = rows[i].split("\t");
+        if (f.size() >= 2l && f[0] == key) then {
+            return f[1];
+        }
+    }
+    return "";
+} end function setting
+
+function toast(const string&: kind, const string&: msg) -> void {
+    grove::Element: bar = grove::get_by_id("notice");
+    bar.remove_class("error");
+    bar.remove_class("info");
+    if (kind == "error") then {
+        bar.add_class("error");
+    } else if (kind == "info") then {
+        bar.add_class("info");
+    }
+    set_text("notice-text", msg);
+    show("notice", true);
+    notice_time = grove::time_ms();
+} end function toast
+
+function update_notices() -> void {
+    string: r = call("notices", notice_seq);
+    auto: rows = r.split("\n");
+    for (long int: i = 0l; i < rows.size(); i += 1l) {
+        auto: f = rows[i].split("\t");
+        if (f.size() < 3l) then {
+            continue;
+        }
+        notice_seq = f[0];
+        toast(f[1], f[2]);
+    }
+    if (notice_time > 0.0 && grove::time_ms() - notice_time > 9000.0) then {
+        show("notice", false);
+        notice_time = 0.0;
+    }
+} end function update_notices
+
+function add_crumb(grove::Element&: box, const string&: label, const string&: path, bool: last) -> void {
+    if (box.child_count() > 0l) then {
+        box.append_child(el("text", "crumb-sep", "/"));
+    }
+    string: cls = "crumb";
+    if (last) then {
+        cls = "crumb last";
+    }
+    grove::Element: b = el("button", cls, label);
+    b.on("click", [path](grove::Event&: e) -> void {
+        enter_folder(path);
+    });
+    box.append_child(b);
+} end function add_crumb
+
+function folder_card(const string&: path, const string&: name, const string&: sounds, const string&: folders) -> grove::Element {
+    grove::Element: card = el("row", "folder", "");
+    card.append_child(el("text", "folder-icon", "\u{25A4}"));
+    grove::Element: col = el("column", "grow", "");
+    col.append_child(el("div", "folder-name", name));
+    string: meta = sounds + " sounds";
+    if (sounds == "1") then {
+        meta = "1 sound";
+    }
+    if (folders != "0" && !folders.empty()) then {
+        if (folders == "1") then {
+            meta = meta + ", 1 folder";
+        } else then {
+            meta = meta + ", " + folders + " folders";
+        }
+    }
+    col.append_child(el("div", "folder-meta", meta));
+    card.append_child(col);
+    card.on("click", [path](grove::Event&: e) -> void {
+        enter_folder(path);
+    });
+    return card;
+} end function folder_card
+
+function sound_tile(long int: index, const string&: line) -> grove::Element {
+    auto: f = line.split("\t");
+    string: path = f[1];
+    string: idx = index.to_string();
+    grove::Element: tile = el("column", "tile", "");
+    tile.set_attribute("id", "tile-" + idx);
+    tile.append_child(el("div", "tile-name", f[2]));
+    grove::Element: meta = el("row", "tile-meta", "");
+    meta.append_child(el("text", "tile-time", f[3]));
+    if (!f[5].empty()) then {
+        meta.append_child(el("text", "tile-key", f[5]));
+    }
+    if (f[6] == "1") then {
+        meta.append_child(el("text", "tile-tag", "edited"));
+    }
+    if (f[8] == "1") then {
+        meta.append_child(el("text", "tile-tag", "video"));
+    }
+    meta.append_child(el("div", "grow", ""));
+    grove::Element: star = el("button", "tile-button", "\u{2606}");
+    if (f[4] == "1") then {
+        star.set_inner_text("\u{2605}");
+        star.add_class("starred");
+    }
+    bool: fav = f[4] == "1";
+    star.on("click", [path, fav](grove::Event&: e) -> void {
+        e.stop_propagation();
+        call("favorite", tab2(path, flag(!fav)));
+        build_board();
+    });
+    meta.append_child(star);
+    grove::Element: edit = el("button", "tile-button", "\u{270E}");
+    edit.on("click", [path](grove::Event&: e) -> void {
+        e.stop_propagation();
+        open_edit(path);
+    });
+    meta.append_child(edit);
+    tile.append_child(meta);
+    grove::Element: bar = el("div", "progress", "");
+    grove::Element: fill = el("div", "progress-fill", "");
+    fill.set_attribute("id", "pf-" + idx);
+    bar.append_child(fill);
+    tile.append_child(bar);
+    tile.on("click", [path](grove::Event&: e) -> void {
+        string: r = call("toggle", path);
+        if (failed(r)) then {
+            toast("error", reason(r));
+        }
+        update_states();
+    });
+    return tile;
+} end function sound_tile
+
+function sound_row(long int: index, const string&: line) -> grove::Element {
+    auto: f = line.split("\t");
+    string: path = f[1];
+    string: idx = index.to_string();
+    grove::Element: r = el("row", "sound-row", "");
+    r.set_attribute("id", "tile-" + idx);
+    r.append_child(el("text", "row-play", "\u{25B6}"));
+    r.append_child(el("div", "row-name", f[2]));
+    if (!f[5].empty()) then {
+        r.append_child(el("text", "tile-key", f[5]));
+    }
+    if (f[6] == "1") then {
+        r.append_child(el("text", "tile-tag", "edited"));
+    }
+    if (view_mode != "folder") then {
+        r.append_child(el("text", "row-folder", f[9] + "  \u{00B7}  " + f[7]));
+    } else then {
+        r.append_child(el("text", "row-folder", f[7]));
+    }
+    grove::Element: bar = el("div", "progress row-progress", "");
+    grove::Element: fill = el("div", "progress-fill", "");
+    fill.set_attribute("id", "pf-" + idx);
+    bar.append_child(fill);
+    r.append_child(bar);
+    r.append_child(el("text", "tile-time", f[3]));
+    grove::Element: star = el("button", "tile-button", "\u{2606}");
+    bool: fav = f[4] == "1";
+    if (fav) then {
+        star.set_inner_text("\u{2605}");
+        star.add_class("starred");
+    }
+    star.on("click", [path, fav](grove::Event&: e) -> void {
+        e.stop_propagation();
+        call("favorite", tab2(path, flag(!fav)));
+        build_board();
+    });
+    r.append_child(star);
+    grove::Element: edit = el("button", "tile-button", "\u{270E}");
+    edit.on("click", [path](grove::Event&: e) -> void {
+        e.stop_propagation();
+        open_edit(path);
+    });
+    r.append_child(edit);
+    r.on("click", [path](grove::Event&: e) -> void {
+        string: res = call("toggle", path);
+        if (failed(res)) then {
+            toast("error", reason(res));
+        }
+        update_states();
+    });
+    return r;
+} end function sound_row
+
+function build_board() -> void {
+    string: r = call("browse", tab3(cur_folder, view_mode, query_text));
+    auto: rows = r.split("\n");
+    grove::Element: folders = grove::get_by_id("folders");
+    grove::Element: tiles = grove::get_by_id("tiles");
+    grove::Element: list = grove::get_by_id("list");
+    grove::Element: crumbs = grove::get_by_id("crumbs");
+    clear(folders);
+    clear(tiles);
+    clear(list);
+    clear(crumbs);
+    active_list = "";
+    long int: dirs = 0l;
+    long int: sounds = 0l;
+    string: title = "";
+    for (long int: i = 0l; i < rows.size(); i += 1l) {
+        auto: f = rows[i].split("\t");
+        if (f.size() < 2l) then {
+            continue;
+        }
+        if (f[0] == "view") then {
+            title = f[3];
+            if (f[1] == "folder") then {
+                cur_folder = f[2];
+                if (f.size() > 4l) then {
+                    parent_folder = f[4];
+                } else then {
+                    parent_folder = "";
+                }
+            } else then {
+                add_crumb(crumbs, "Library", "", false);
+                crumbs.append_child(el("text", "crumb-sep", "/"));
+                crumbs.append_child(el("text", "crumb last", title));
+            }
+        } else if (f[0] == "crumb") then {
+            bool: last = i + 1l >= rows.size() || !rows[i + 1l].starts_with("crumb");
+            add_crumb(crumbs, f[1], f[2], last);
+        } else if (f[0] == "dir" && f.size() >= 5l) then {
+            folders.append_child(folder_card(f[1], f[2], f[3], f[4]));
+            dirs += 1l;
+        } else if (f[0] == "sound" && f.size() >= 10l) then {
+            if (view_kind == "list") then {
+                list.append_child(sound_row(sounds, rows[i]));
+            } else then {
+                tiles.append_child(sound_tile(sounds, rows[i]));
+            }
+            sounds += 1l;
+        }
+    }
+    auto: state = call("lib_state", "").split("\t");
+    bool: no_roots = state.size() >= 4l && state[3] == "0";
+    show("welcome", no_roots && view_mode == "folder");
+    show("folder-title", dirs > 0l && cur_folder != "");
+    show("sound-title", sounds > 0l && dirs > 0l);
+    bool: nothing = dirs == 0l && sounds == 0l && !no_roots;
+    show("board-empty", nothing);
+    if (nothing) then {
+        if (view_mode == "search") then {
+            set_text("board-empty", "No sounds match \u{201C}" + query_text + "\u{201D}.");
+        } else if (view_mode == "favorites") then {
+            set_text("board-empty", "No favorites yet. Click the \u{2606} on a sound to add it here.");
+        } else if (view_mode == "recent") then {
+            set_text("board-empty", "Sounds you play show up here.");
+        } else then {
+            set_text("board-empty", "This folder has no sounds yet. Copy some in from the Files page.");
+        }
+    }
+    grove::Element: favs = grove::get_by_id("show-favorites");
+    grove::Element: recent = grove::get_by_id("show-recent");
+    favs.remove_class("primary");
+    recent.remove_class("primary");
+    if (view_mode == "favorites") then {
+        favs.add_class("primary");
+    } else if (view_mode == "recent") then {
+        recent.add_class("primary");
+    }
+    update_states();
+} end function build_board
+
+function enter_folder(const string&: path) -> void {
+    cur_folder = path;
+    view_mode = "folder";
+    query_text = "";
+    filling = true;
+    grove::get_by_id("search").set_value_string("");
+    filling = false;
+    call("set", tab2("last_folder", path));
+    build_board();
+} end function enter_folder
+
+function set_mode(const string&: mode) -> void {
+    if (view_mode == mode) then {
+        view_mode = "folder";
+    } else then {
+        view_mode = mode;
+    }
+    build_board();
+} end function set_mode
+
+function clear_state(const string&: idx) -> void {
+    grove::Element: t = grove::get_by_id("tile-" + idx);
+    if (t.exists()) then {
+        t.remove_class("playing");
+        t.remove_class("loading");
+    }
+    grove::Element: p = grove::get_by_id("pf-" + idx);
+    if (p.exists()) then {
+        p.set_style("width", "0%");
+    }
+} end function clear_state
+
+function update_states() -> void {
+    string: r = call("states", "");
+    auto: rows = r.split("\n");
+    string: now_active = "|";
+    for (long int: i = 0l; i < rows.size(); i += 1l) {
+        auto: f = rows[i].split("\t");
+        if (f.size() < 2l) then {
+            continue;
+        }
+        if (f[0] == "now") then {
+            set_text("now-playing", f[1]);
+            continue;
+        }
+        if (f.size() < 4l) then {
+            continue;
+        }
+        now_active = now_active + f[0] + "|";
+        grove::Element: t = grove::get_by_id("tile-" + f[0]);
+        if (!t.exists()) then {
+            continue;
+        }
+        if (f[1] == "playing") then {
+            t.add_class("playing");
+            t.remove_class("loading");
+        } else then {
+            t.add_class("loading");
+        }
+        grove::get_by_id("pf-" + f[0]).set_style("width", f[2] + "%");
+    }
+    auto: old = active_list.split("|");
+    for (long int: i = 0l; i < old.size(); i += 1l) {
+        if (old[i].empty()) then {
+            continue;
+        }
+        if (!now_active.contains("|" + old[i] + "|")) then {
+            clear_state(old[i]);
+        }
+    }
+    active_list = now_active;
+} end function update_states
+
+function set_meter(const string&: id, const string&: pct) -> void {
+    grove::Element: m = grove::get_by_id(id);
+    if (!m.exists()) then {
+        return;
+    }
+    m.set_style("width", pct + "%");
+    short float: v = to_float(pct);
+    m.remove_class("hot");
+    m.remove_class("clip");
+    if (v >= 99.0) then {
+        m.add_class("clip");
+    } else if (v >= 90.0) then {
+        m.add_class("hot");
+    }
+} end function set_meter
+
+function update_mic_button(const string&: open, const string&: ptt, const string&: talking, const string&: enabled) -> void {
+    grove::Element: b = grove::get_by_id("mic-button");
+    b.remove_class("off");
+    b.remove_class("ptt");
+    if (enabled != "1") then {
+        b.add_class("off");
+        b.set_inner_text("Mic off");
+    } else if (ptt == "1") then {
+        if (talking == "1") then {
+            b.set_inner_text("Talking");
+        } else then {
+            b.add_class("ptt");
+            b.set_inner_text("Push to talk");
+        }
+    } else then {
+        b.set_inner_text("Mic on");
+    }
+} end function update_mic_button
+
+function update_meters() -> void {
+    auto: f = call("meters", "").split("\t");
+    if (f.size() < 8l) then {
+        return;
+    }
+    if (f.size() > 9l && f[9] == "1") then {
+        grove::quit();
+        return;
+    }
+    set_meter("mini-meter-fill", f[1]);
+    update_mic_button(f[4], f[5], f[6], f[7]);
+    if (grove::get_by_id("output").is_current()) then {
+        set_meter("m-mic", f[0]);
+        set_meter("m-voice", f[1]);
+        set_meter("m-send", f[2]);
+        set_meter("m-mon", f[3]);
+    } else if (grove::get_by_id("voice").is_current()) then {
+        set_meter("vm-in", f[0]);
+        set_meter("vm-out", f[1]);
+        bool: on = f[7] == "1";
+        if (grove::get_by_id("voice-mic").value_bool() != on) then {
+            filling = true;
+            grove::get_by_id("voice-mic").set_value_bool(on);
+            filling = false;
+        }
+    }
+} end function update_meters
+
+function check_library() -> void {
+    auto: f = call("lib_state", "").split("\t");
+    if (f.size() < 1l) then {
+        return;
+    }
+    if (f[0] != lib_rev) then {
+        lib_rev = f[0];
+        build_board();
+        if (grove::get_by_id("files").is_current()) then {
+            fill_places();
+            fill_targets();
+        }
+        if (grove::get_by_id("settings").is_current()) then {
+            fill_roots();
+        }
+    }
+} end function check_library
+
+function add_voice_control(grove::Element&: card, const string&: slot, const string&: line) -> void {
+    auto: f = line.split("\t");
+    string: control = f[2];
+    string: decimals = f[9];
+    string: unit = f[4];
+    string: safe = control.replace(".", "-");
+    grove::Element: fxrow = el("row", "fx-row", "");
+    string: label = f[3];
+    if (!unit.empty()) then {
+        label = label + " (" + unit + ")";
+    }
+    fxrow.append_child(el("text", "fx-label", label));
+    if (f.size() > 10l && !f[10].empty()) then {
+        grove::Element: sel = grove::create_element("input_select");
+        sel.set_attribute("class", "fx-select");
+        sel.set_attribute("id", "c-" + safe);
+        auto: choices = f[10].split("|");
+        for (long int: i = 0l; i < choices.size(); i += 1l) {
+            auto: kv = choices[i].split("=");
+            if (kv.size() < 2l) then {
+                continue;
+            }
+            grove::Element: o = el("option", "", kv[1]);
+            o.set_attribute("value", kv[0]);
+            sel.append_child(o);
+        }
+        sel.on("change", [control](grove::Event&: e) -> void {
+            if (filling) then {
+                return;
+            }
+            voice_value_changed(control, e.target().value_string());
+        });
+        fxrow.append_child(sel);
+    } else then {
+        grove::Element: s = grove::create_element("input_slider");
+        s.set_attribute("class", "fx-slider");
+        s.set_attribute("id", "c-" + safe);
+        s.set_attribute("min", f[5]);
+        s.set_attribute("max", f[6]);
+        s.set_attribute("step", f[7]);
+        s.on("input", [control](grove::Event&: e) -> void {
+            if (filling) then {
+                return;
+            }
+            voice_value_changed(control, e.target().value_float().to_string());
+        });
+        fxrow.append_child(s);
+    }
+    grove::Element: reset = el("button", "reset", "\u{21BA}");
+    reset.on("click", [control, safe](grove::Event&: e) -> void {
+        string: value = call("voice_reset_control", control);
+        filling = true;
+        grove::Element: input = grove::get_by_id("c-" + safe);
+        if (input.tag() == "input_select") then {
+            input.set_value_string(fmt(value, "0"));
+        } else then {
+            input.set_value_float(to_float(value));
+        }
+        filling = false;
+    });
+    fxrow.append_child(reset);
+    card.append_child(fxrow);
+} end function add_voice_control
+
+function build_voice() -> void {
+    grove::Element: board = grove::get_by_id("voice-board");
+    clear(board);
+    string: r = call("voice_slots", "");
+    auto: rows = r.split("\n");
+    grove::Element: grid = el("row", "fx-grid", "");
+    grove::Element: card = el("column", "fx", "");
+    bool: have_card = false;
+    for (long int: i = 0l; i < rows.size(); i += 1l) {
+        auto: f = rows[i].split("\t");
+        if (f.size() < 3l) then {
+            continue;
+        }
+        if (f[0] == "slot" && f.size() >= 5l) then {
+            if (have_card) then {
+                grid.append_child(card);
+            }
+            string: slot = f[1];
+            card = el("column", "fx", "");
+            card.set_attribute("id", "fx-" + slot);
+            have_card = true;
+            grove::Element: head = el("row", "fx-head", "");
+            grove::Element: sw = grove::create_element("input_bool");
+            sw.set_attribute("id", "fxon-" + slot);
+            sw.set_attribute("switch", "");
+            sw.on("change", [slot](grove::Event&: e) -> void {
+                if (filling) then {
+                    return;
+                }
+                call("voice_enable", tab2(slot, flag(e.target().value_bool())));
+                refresh_voice();
+            });
+            head.append_child(sw);
+            head.append_child(el("text", "fx-title", f[2]));
+            head.append_child(el("text", "fx-group", f[3]));
+            grove::Element: reset = el("button", "reset", "\u{21BA}");
+            reset.on("click", [slot](grove::Event&: e) -> void {
+                call("voice_reset_slot", slot);
+                refresh_voice();
+            });
+            head.append_child(reset);
+            card.append_child(head);
+            card.append_child(el("p", "fx-hint", f[4]));
+        } else if (f[0] == "control" && f.size() >= 10l) then {
+            add_voice_control(card, f[1], rows[i]);
+        }
+    }
+    if (have_card) then {
+        grid.append_child(card);
+    }
+    board.append_child(grid);
+    voice_built = true;
+    fill_presets();
+    refresh_voice();
+} end function build_voice
+
+function voice_value_changed(const string&: control, const string&: value) -> void {
+    string: r = call("voice_set", tab2(control, value));
+    if (failed(r)) then {
+        return;
+    }
+    auto: parts = control.split(".");
+    string: slot = parts[0];
+    grove::Element: sw = grove::get_by_id("fxon-" + slot);
+    if (!sw.value_bool()) then {
+        filling = true;
+        sw.set_value_bool(true);
+        filling = false;
+    }
+    grove::get_by_id("fx-" + slot).add_class("on");
+} end function voice_value_changed
+
+function refresh_voice() -> void {
+    if (!voice_built) then {
+        return;
+    }
+    string: r = call("voice_state", "");
+    auto: rows = r.split("\n");
+    filling = true;
+    for (long int: i = 0l; i < rows.size(); i += 1l) {
+        auto: f = rows[i].split("\t");
+        if (f.size() < 2l) then {
+            continue;
+        }
+        if (f[0] == "slot" && f.size() >= 3l) then {
+            bool: on = f[2] == "1";
+            grove::get_by_id("fxon-" + f[1]).set_value_bool(on);
+            grove::Element: card = grove::get_by_id("fx-" + f[1]);
+            if (on) then {
+                card.add_class("on");
+            } else then {
+                card.remove_class("on");
+            }
+        } else if (f[0] == "value" && f.size() >= 3l) then {
+            string: safe = f[1].replace(".", "-");
+            grove::Element: input = grove::get_by_id("c-" + safe);
+            if (!input.exists()) then {
+                continue;
+            }
+            if (input.tag() == "input_select") then {
+                input.set_value_string(fmt(f[2], "0"));
+            } else then {
+                input.set_value_float(to_float(f[2]));
+            }
+        } else if (f[0] == "preset") then {
+            if (f[1].empty()) then {
+                grove::get_by_id("preset-select").set_value_string("none");
+            } else then {
+                grove::get_by_id("preset-select").set_value_string(f[1]);
+            }
+        } else if (f[0] == "active") then {
+            if (f[1] == "0") then {
+                set_text("voice-summary", "Your voice is untouched");
+            } else if (f[1] == "1") then {
+                set_text("voice-summary", "1 effect on");
+            } else then {
+                set_text("voice-summary", f[1] + " effects on");
+            }
+        } else if (f[0] == "latency") then {
+            if (f[1] != "0") then {
+                set_text("voice-summary", grove::get_by_id("voice-summary").inner_text() + ", " + f[1] + " ms delay");
+            }
+        }
+    }
+    filling = false;
+} end function refresh_voice
+
+function fill_presets() -> void {
+    grove::Element: sel = grove::get_by_id("preset-select");
+    clear(sel);
+    string: r = call("presets", "");
+    auto: rows = r.split("\n");
+    grove::Element: none = el("option", "", "No effects (your normal voice)");
+    none.set_attribute("value", "none");
+    sel.append_child(none);
+    for (long int: i = 0l; i < rows.size(); i += 1l) {
+        auto: f = rows[i].split("\t");
+        if (f.size() < 2l) then {
+            continue;
+        }
+        string: label = f[0];
+        if (f[1] == "user") then {
+            label = f[0] + "  (yours)";
+        } else if (f.size() >= 3l && !f[2].empty()) then {
+            label = f[0] + " \u{2014} " + f[2];
+        }
+        grove::Element: o = el("option", "", label);
+        o.set_attribute("value", f[0]);
+        sel.append_child(o);
+    }
+} end function fill_presets
+
+function fill_devices(const string&: select_id, const string&: kind, const string&: current, const string&: auto_label, bool: with_none) -> void {
+    grove::Element: sel = grove::get_by_id(select_id);
+    clear(sel);
+    grove::Element: d = el("option", "", auto_label);
+    d.set_attribute("value", "");
+    sel.append_child(d);
+    string: r = call("devices", kind);
+    auto: rows = r.split("\n");
+    bool: found = current.empty() || current == "none";
+    for (long int: i = 0l; i < rows.size(); i += 1l) {
+        auto: f = rows[i].split("\t");
+        if (f.size() < 2l) then {
+            continue;
+        }
+        grove::Element: o = el("option", "", f[1]);
+        o.set_attribute("value", f[0]);
+        sel.append_child(o);
+        if (f[0] == current) then {
+            found = true;
+        }
+    }
+    if (!found) then {
+        grove::Element: o = el("option", "", current + " (not connected)");
+        o.set_attribute("value", current);
+        sel.append_child(o);
+    }
+    if (with_none) then {
+        grove::Element: n = el("option", "", "None");
+        n.set_attribute("value", "none");
+        sel.append_child(n);
+    }
+    sel.set_value_string(current);
+} end function fill_devices
+
+function load_output() -> void {
+    string: s = call("settings", "");
+    filling = true;
+    bool: auto_on = setting(s, "auto_mode") == "1";
+    grove::get_by_id("auto-mode").set_value_bool(auto_on);
+    grove::get_by_id("mic-enabled").set_value_bool(setting(s, "mic_enabled") == "1");
+    grove::get_by_id("ptt").set_value_bool(setting(s, "push_to_talk") == "1");
+    grove::get_by_id("hear-myself").set_value_bool(setting(s, "hear_myself") == "1");
+    grove::get_by_id("to-others").set_value_bool(setting(s, "sounds_to_others") == "1");
+    grove::get_by_id("to-me").set_value_bool(setting(s, "sounds_to_me") == "1");
+    grove::get_by_id("vmic-on").set_value_bool(setting(s, "virtual_mic") == "1");
+    grove::get_by_id("vmic-keep").set_value_bool(setting(s, "keep_virtual_mic") == "1");
+    grove::get_by_id("mic-volume").set_value_float(to_float(setting(s, "mic_volume")));
+    grove::get_by_id("hear-volume").set_value_float(to_float(setting(s, "hear_myself_volume")));
+    grove::get_by_id("sounds-volume").set_value_float(to_float(setting(s, "sounds_volume")));
+    grove::get_by_id("others-volume").set_value_float(to_float(setting(s, "others_volume")));
+    grove::get_by_id("me-volume").set_value_float(to_float(setting(s, "me_volume")));
+    string: input_label = "Default microphone";
+    string: monitor_label = "Default speakers or headphones";
+    fill_devices("dev-input", "input", setting(s, "input_device"), input_label, true);
+    fill_devices("dev-monitor", "output", setting(s, "monitor_device"), monitor_label, true);
+    fill_devices("dev-send", "output", setting(s, "send_device"), "Nowhere else", false);
+    filling = false;
+    string: ptt_key = setting(s, "key_push_to_talk");
+    if (ptt_key.empty()) then {
+        set_text("ptt-hint", "Pick a push-to-talk key on the Settings page. Until then, hold the Mic button at the top.");
+    } else then {
+        set_text("ptt-hint", "Hold " + ptt_key + " to talk. It works while Rustle has focus, or everywhere with global hotkeys on (Settings).");
+    }
+    if (setting(s, "platform_vmic") == "1") then {
+        set_text("vmic-hint", "Rustle Mic is a virtual microphone made through PulseAudio or PipeWire: your changed voice and your sounds go into it, and other programs record from it. Turn it off to send to another output instead, such as a recorder.");
+    } else then {
+        set_text("vmic-hint", "Rustle Mic needs PulseAudio or PipeWire, so it only exists on Linux. Install a virtual audio cable (VB-CABLE on Windows, BlackHole on macOS), pick its input here, and choose the cable as the microphone in Discord or OBS.");
+        grove::get_by_id("vmic-on").set_attribute("disabled", "");
+        grove::get_by_id("vmic-keep").set_attribute("disabled", "");
+    }
+    grove::get_by_id("quick-others").set_value_float(to_float(setting(s, "others_volume")));
+    grove::get_by_id("quick-me").set_value_float(to_float(setting(s, "me_volume")));
+    update_route();
+} end function load_output
+
+function set_dot(const string&: id, const string&: state) -> void {
+    grove::Element: d = grove::get_by_id(id);
+    d.remove_class("ok");
+    d.remove_class("waiting");
+    d.remove_class("off");
+    d.add_class(state);
+} end function set_dot
+
+function update_vmic_pill() -> void {
+    string: r = call("route", "");
+    grove::Element: pill = grove::get_by_id("vmic-pill");
+    pill.remove_class("ok");
+    pill.remove_class("waiting");
+    pill.remove_class("off");
+    if (setting(r, "vmic_ready") == "1" && setting(r, "send_running") == "1") then {
+        pill.add_class("ok");
+        set_text("vmic-pill-text", "Rustle Mic ready");
+    } else if (setting(r, "send_running") == "1") then {
+        pill.add_class("ok");
+        set_text("vmic-pill-text", "Sending to " + setting(r, "send_device"));
+    } else if (setting(r, "vmic_wanted") == "1") then {
+        pill.add_class("off");
+        set_text("vmic-pill-text", "No Rustle Mic");
+    } else then {
+        pill.add_class("waiting");
+        set_text("vmic-pill-text", "Only you hear sounds");
+    }
+    route_vmic = r;
+} end function update_vmic_pill
+
+function update_route() -> void {
+    update_vmic_pill();
+    string: r = route_vmic;
+    string: problems = "";
+    if (setting(r, "vmic_supported") != "1") then {
+        set_dot("st-vmic-dot", "waiting");
+        set_text("st-vmic", "Not on this system; use a virtual cable below");
+    } else if (setting(r, "vmic_ready") == "1") then {
+        set_dot("st-vmic-dot", "ok");
+        set_text("st-vmic", "Ready. Pick \u{201C}Rustle Mic\u{201D} as the microphone in other programs");
+    } else if (setting(r, "vmic_wanted") == "1") then {
+        set_dot("st-vmic-dot", "off");
+        set_text("st-vmic", "Couldn't make it");
+        problems = setting(r, "vmic_message");
+    } else then {
+        set_dot("st-vmic-dot", "waiting");
+        set_text("st-vmic", "Turned off");
+    }
+    if (setting(r, "capture_running") == "1") then {
+        set_dot("st-mic-dot", "ok");
+        set_text("st-mic", setting(r, "capture_device"));
+    } else if (setting(r, "capture_wanted") == "1") then {
+        set_dot("st-mic-dot", "off");
+        set_text("st-mic", "Not working");
+        problems = problems + "\nMicrophone: " + setting(r, "capture_error");
+    } else then {
+        set_dot("st-mic-dot", "waiting");
+        set_text("st-mic", "None picked");
+    }
+    if (setting(r, "send_running") == "1") then {
+        set_dot("st-send-dot", "ok");
+        set_text("st-send", setting(r, "send_device"));
+    } else if (setting(r, "send_wanted") == "1") then {
+        set_dot("st-send-dot", "off");
+        set_text("st-send", "Not working");
+        problems = problems + "\nSending: " + setting(r, "send_error");
+    } else then {
+        set_dot("st-send-dot", "waiting");
+        set_text("st-send", "Nowhere (only you hear your sounds)");
+    }
+    if (setting(r, "monitor_running") == "1") then {
+        set_dot("st-mon-dot", "ok");
+        set_text("st-mon", setting(r, "monitor_device"));
+    } else if (setting(r, "monitor_wanted") == "1") then {
+        set_dot("st-mon-dot", "off");
+        set_text("st-mon", "Not working");
+        problems = problems + "\nSpeakers: " + setting(r, "monitor_error");
+    } else then {
+        set_dot("st-mon-dot", "waiting");
+        set_text("st-mon", "Off");
+    }
+    problems = problems.trim();
+    set_text("st-problem", problems);
+    show("st-problem", !problems.empty());
+    string: server = setting(r, "server");
+    if (server.empty()) then {
+        set_text("st-server", "");
+    } else then {
+        set_text("st-server", "Sound server: " + server);
+    }
+} end function update_route
+
+function fill_places() -> void {
+    grove::Element: box = grove::get_by_id("places");
+    clear(box);
+    auto: rows = call("places", "").split("\n");
+    for (long int: i = 0l; i < rows.size(); i += 1l) {
+        auto: f = rows[i].split("\t");
+        if (f.size() < 2l) then {
+            continue;
+        }
+        string: path = f[1];
+        grove::Element: b = el("button", "place", f[0]);
+        if (path == fb_path) then {
+            b.add_class("current");
+        }
+        b.on("click", [path](grove::Event&: e) -> void {
+            open_dir(path);
+        });
+        box.append_child(b);
+    }
+    grove::Element: roots = grove::get_by_id("lib-roots");
+    clear(roots);
+    auto: lr = call("folders", "").split("\n");
+    long int: n = 0l;
+    for (long int: i = 0l; i < lr.size(); i += 1l) {
+        auto: f = lr[i].split("\t");
+        if (f.size() < 3l) then {
+            continue;
+        }
+        string: path = f[0];
+        grove::Element: b = el("button", "place", f[1] + "  (" + f[2] + ")");
+        if (path == fb_path) then {
+            b.add_class("current");
+        }
+        b.on("click", [path](grove::Event&: e) -> void {
+            open_dir(path);
+        });
+        roots.append_child(b);
+        n += 1l;
+    }
+    if (n == 0l) then {
+        roots.append_child(el("p", "hint", "No folders yet"));
+    }
+} end function fill_places
+
+function fill_targets() -> void {
+    grove::Element: sel = grove::get_by_id("fb-target");
+    string: before = sel.value_string();
+    clear(sel);
+    auto: rows = call("library_targets", "").split("\n");
+    for (long int: i = 0l; i < rows.size(); i += 1l) {
+        auto: f = rows[i].split("\t");
+        if (f.size() < 2l) then {
+            continue;
+        }
+        grove::Element: o = el("option", "", f[1]);
+        o.set_attribute("value", f[0]);
+        sel.append_child(o);
+    }
+    if (!before.empty()) then {
+        sel.set_value_string(before);
+    } else if (rows.size() > 0l) then {
+        auto: first = rows[0].split("\t");
+        if (first.size() >= 2l) then {
+            sel.set_value_string(first[0]);
+        }
+    }
+} end function fill_targets
+
+function selected_count() -> long int {
+    long int: n = 0l;
+    auto: parts = fb_selected.split("\t");
+    for (long int: i = 0l; i < parts.size(); i += 1l) {
+        if (!parts[i].empty()) then {
+            n += 1l;
+        }
+    }
+    return n;
+} end function selected_count
+
+function toggle_selected(const string&: path, bool: on) -> void {
+    auto: parts = fb_selected.split("\t");
+    string: out = "";
+    for (long int: i = 0l; i < parts.size(); i += 1l) {
+        if (parts[i].empty() || parts[i] == path) then {
+            continue;
+        }
+        out = out + parts[i] + "\t";
+    }
+    if (on) then {
+        out = out + path + "\t";
+    }
+    fb_selected = out;
+    long int: n = selected_count();
+    if (n == 0l) then {
+        set_text("fb-selected", "Tick sound files to copy them into your library");
+    } else if (n == 1l) then {
+        set_text("fb-selected", "1 sound file picked");
+    } else then {
+        set_text("fb-selected", n.to_string() + " sound files picked");
+    }
+} end function toggle_selected
+
+function open_dir(const string&: path) -> void {
+    string: dots = flag(grove::get_by_id("fb-hidden").value_bool());
+    string: r = call("list_dir", tab2(path, dots));
+    if (failed(r)) then {
+        toast("error", reason(r));
+        return;
+    }
+    auto: rows = r.split("\n");
+    grove::Element: list = grove::get_by_id("fb-list");
+    grove::Element: crumbs = grove::get_by_id("fb-crumbs");
+    clear(list);
+    clear(crumbs);
+    bool: in_library = false;
+    for (long int: i = 0l; i < rows.size(); i += 1l) {
+        auto: f = rows[i].split("\t");
+        if (f.size() < 2l) then {
+            continue;
+        }
+        if (f[0] == "ok" && f.size() >= 4l) then {
+            if (fb_path != f[1]) then {
+                fb_selected = "";
+                toggle_selected("", false);
+            }
+            fb_path = f[1];
+            in_library = f[3] == "1";
+            filling = true;
+            grove::get_by_id("fb-path").set_value_string(fb_path);
+            filling = false;
+            call("set", tab2("browser_path", fb_path));
+        } else if (f[0] == "crumb" && f.size() >= 3l) then {
+            string: at = f[2];
+            if (crumbs.child_count() > 0l) then {
+                crumbs.append_child(el("text", "crumb-sep", "\u{203A}"));
+            }
+            grove::Element: b = el("button", "crumb", f[1]);
+            b.on("click", [at](grove::Event&: e) -> void {
+                open_dir(at);
+            });
+            crumbs.append_child(b);
+        } else if (f[0] == "item" && f.size() >= 7l) then {
+            string: item_path = f[2];
+            bool: is_dir = f[3] == "1";
+            bool: is_sound = f[4] == "1";
+            grove::Element: line = el("row", "file-row", "");
+            if (is_dir) then {
+                line.add_class("is-dir");
+                line.append_child(el("text", "file-icon dir", "\u{25B8}"));
+                line.append_child(el("div", "file-name", f[1]));
+                line.on("click", [item_path](grove::Event&: e) -> void {
+                    open_dir(item_path);
+                });
+            } else if (is_sound) then {
+                grove::Element: pick = grove::create_element("input_bool");
+                pick.set_attribute("class", "pick");
+                bool: picked = fb_selected.contains(item_path + "\t");
+                pick.set_value_bool(picked);
+                pick.on("change", [item_path](grove::Event&: e) -> void {
+                    toggle_selected(item_path, e.target().value_bool());
+                });
+                line.append_child(pick);
+                line.append_child(el("text", "file-icon sound", "\u{266A}"));
+                line.append_child(el("div", "file-name", f[1]));
+                grove::Element: play = el("button", "tile-button", "\u{25B6}");
+                play.on("click", [item_path](grove::Event&: e) -> void {
+                    string: res = call("toggle", item_path);
+                    if (failed(res)) then {
+                        toast("error", reason(res));
+                    }
+                });
+                line.append_child(play);
+            } else then {
+                line.add_class("other");
+                line.append_child(el("text", "file-icon", ""));
+                line.append_child(el("div", "file-name", f[1]));
+            }
+            line.append_child(el("text", "file-size", f[5]));
+            list.append_child(line);
+        } else if (f[0] == "count" && f.size() >= 3l) then {
+            string: status = f[1] + " items";
+            if (f[2] == "1") then {
+                status = status + ", 1 sound";
+            } else if (f[2] != "0") then {
+                status = status + ", " + f[2] + " sounds";
+            }
+            if (in_library) then {
+                status = status + "  \u{2022}  in your library";
+            }
+            set_text("fb-status", status);
+        }
+    }
+    show("fb-add", !in_library);
+    fill_places();
+} end function open_dir
+
+function fill_roots() -> void {
+    grove::Element: box = grove::get_by_id("root-list");
+    clear(box);
+    auto: rows = call("folders", "").split("\n");
+    long int: n = 0l;
+    for (long int: i = 0l; i < rows.size(); i += 1l) {
+        auto: f = rows[i].split("\t");
+        if (f.size() < 4l) then {
+            continue;
+        }
+        string: path = f[0];
+        grove::Element: line = el("row", "root-row", "");
+        grove::Element: label = el("text", "root-path", path);
+        if (f[3] != "1") then {
+            label.add_class("missing");
+            label.set_inner_text(path + "  (missing)");
+        }
+        line.append_child(label);
+        line.append_child(el("text", "muted", f[2] + " sounds"));
+        grove::Element: open = el("button", "ghost small-button", "Open");
+        open.on("click", [path](grove::Event&: e) -> void {
+            grove::navigate("sounds");
+            enter_folder(path);
+        });
+        line.append_child(open);
+        grove::Element: rm = el("button", "ghost small-button", "Remove");
+        rm.on("click", [path](grove::Event&: e) -> void {
+            grove::confirm("Remove folder", "Take " + path + " out of the library? The files stay where they are.", [path](bool: yes) -> void {
+                if (yes) then {
+                    call("remove_folder", path);
+                    fill_roots();
+                    if (cur_folder.starts_with(path)) then {
+                        cur_folder = "";
+                    }
+                    build_board();
+                }
+            });
+        });
+        line.append_child(rm);
+        box.append_child(line);
+        n += 1l;
+    }
+    if (n == 0l) then {
+        box.append_child(el("p", "hint", "No sound folders yet. Add one from the Files page."));
+    }
+} end function fill_roots
+
+function key_label(const string&: chord) -> string {
+    if (chord.empty()) then {
+        return "Not set";
+    }
+    return chord;
+} end function key_label
+
+function fill_sound_keys() -> void {
+    grove::Element: box = grove::get_by_id("sound-keys");
+    clear(box);
+    auto: rows = call("keybinds", "").split("\n");
+    long int: n = 0l;
+    for (long int: i = 0l; i < rows.size(); i += 1l) {
+        auto: f = rows[i].split("\t");
+        if (f.size() < 3l) then {
+            continue;
+        }
+        string: path = f[0];
+        grove::Element: line = el("row", "key-row", "");
+        line.append_child(el("text", "key-chord", f[2]));
+        line.append_child(el("text", "grow", f[1]));
+        grove::Element: edit = el("button", "ghost small-button", "Edit sound");
+        edit.on("click", [path](grove::Event&: e) -> void {
+            open_edit(path);
+        });
+        line.append_child(edit);
+        grove::Element: rm = el("button", "ghost small-button", "Clear");
+        rm.on("click", [path](grove::Event&: e) -> void {
+            call("keybind_set", tab2(path, ""));
+            fill_sound_keys();
+            build_board();
+        });
+        line.append_child(rm);
+        box.append_child(line);
+        n += 1l;
+    }
+    if (n == 0l) then {
+        box.append_child(el("p", "hint", "No sound has a key yet."));
+    }
+} end function fill_sound_keys
+
+function update_hotkeys() -> void {
+    auto: f = call("hotkeys", "").split("\t");
+    if (f.size() < 7l) then {
+        return;
+    }
+    string: msg = f[2];
+    if (grove::get_by_id("global-keys").value_bool()) then {
+        if (!f[3].empty()) then {
+            msg = msg + " Listening for: " + f[3] + ".";
+        }
+        if (!f[4].empty()) then {
+            msg = msg + " Couldn't take: " + f[4] + ".";
+        }
+    } else then {
+        msg = "Keys work while Rustle's window has focus.";
+        if (f[5] != "1") then {
+            msg = msg + " Global hotkeys aren't available here: " + f[6];
+        } else if (f[6] == "wayland") then {
+            msg = msg + " You're on Wayland, where programs can't grab keys for the whole desktop; global hotkeys only catch keys while an X11 window has focus. For keys that always work, add shortcuts in your desktop's settings that run the rustle ctl commands below.";
+        }
+    }
+    set_text("hotkey-report", msg);
+} end function update_hotkeys
+
+function load_settings_page() -> void {
+    string: s = call("settings", "");
+    filling = true;
+    grove::get_by_id("global-keys").set_value_bool(setting(s, "global_hotkeys") == "1");
+    grove::get_by_id("rescan-interval").set_value_string(setting(s, "rescan_seconds"));
+    filling = false;
+    grove::get_by_id("key-stop").set_inner_text(key_label(setting(s, "key_stop_all")));
+    grove::get_by_id("key-mic").set_inner_text(key_label(setting(s, "key_mic_toggle")));
+    grove::get_by_id("key-ptt").set_inner_text(key_label(setting(s, "key_push_to_talk")));
+    string: socket = setting(s, "control_socket");
+    if (socket.empty()) then {
+        set_text("ctl-hint", "These commands need a Unix socket, so they work on Linux and macOS. On Windows use global hotkeys instead.");
+    } else if (setting(s, "control_running") == "1") then {
+        set_text("ctl-hint", "Scripts, stream decks and desktop shortcuts can drive this Rustle window with these commands (it listens on " + socket + "):");
+    } else then {
+        set_text("ctl-hint", "Another Rustle already answers these commands, so this window doesn't:");
+    }
+    set_text("about-version", call("version", ""));
+    set_text("about-config", setting(s, "config_dir"));
+    set_text("about-backend", setting(s, "backend") + " (" + setting(s, "session_kind") + " desktop)");
+    fill_roots();
+    fill_sound_keys();
+    update_hotkeys();
+} end function load_settings_page
+
+function open_edit(const string&: path) -> void {
+    edit_path = path;
+    string: r = call("edit_get", path);
+    filling = true;
+    edit_duration = to_float(setting(r, "duration"));
+    string: span = "10";
+    if (edit_duration > 0.0) then {
+        span = edit_duration.to_string();
+    }
+    grove::get_by_id("ed-trim_start").set_attribute("max", span);
+    grove::get_by_id("ed-trim_end").set_attribute("max", span);
+    auto: keys = "volume speed tempo pitch reverb reverb_size trim_start trim_end fade_in fade_out".split(" ");
+    for (long int: i = 0l; i < keys.size(); i += 1l) {
+        string: value = setting(r, keys[i]);
+        grove::get_by_id("ed-" + keys[i]).set_value_float(to_float(value));
+    }
+    grove::get_by_id("ed-reverse").set_value_bool(setting(r, "reverse") == "1");
+    grove::get_by_id("ed-loop").set_value_bool(setting(r, "loop") == "1");
+    filling = false;
+    set_text("ed-name", setting(r, "name"));
+    string: length = "length unknown";
+    if (edit_duration > 0.0) then {
+        length = fmt(setting(r, "duration"), "2") + " s";
+    }
+    string: plays = setting(r, "plays");
+    string: played = "never played";
+    if (plays == "1") then {
+        played = "played once";
+    } else if (plays != "0" && !plays.empty()) then {
+        played = "played " + plays + " times";
+    }
+    set_text("ed-file", setting(r, "file") + "  \u{2022}  " + length + "  \u{2022}  " + played);
+    grove::get_by_id("ed-key").set_inner_text(key_label(setting(r, "keybind")));
+    if (setting(r, "favorite") == "1") then {
+        set_text("ed-fav", "\u{2605}");
+    } else then {
+        set_text("ed-fav", "\u{2606}");
+    }
+    grove::get_by_id("edit-modal").open_modal();
+    edit_open = true;
+} end function open_edit
+
+function edit_field(const string&: key) -> void {
+    grove::get_by_id("ed-" + key).on("input", [key](grove::Event&: e) -> void {
+        if (filling || edit_path.empty()) then {
+            return;
+        }
+        call("edit_set", tab3(edit_path, key, e.target().value_float().to_string()));
+    });
+    grove::get_by_id("ed-" + key + "-r").on("click", [key](grove::Event&: e) -> void {
+        string: value = "0";
+        if (key == "volume" || key == "speed" || key == "tempo") then {
+            value = "1";
+        } else if (key == "reverb_size") then {
+            value = "0.5";
+        }
+        edit_reset_field(key, value);
+    });
+} end function edit_field
+
+function edit_reset_field(const string&: key, const string&: value) -> void {
+    call("edit_set", tab3(edit_path, key, value));
+    filling = true;
+    grove::get_by_id("ed-" + key).set_value_float(to_float(value));
+    filling = false;
+} end function edit_reset_field
+
+function open_key_capture(const string&: target, const string&: label) -> void {
+    key_target = target;
+    set_text("key-for", label);
+    set_text("key-seen", "\u{2026}");
+    grove::get_by_id("key-modal").open_modal();
+    grove::get_by_id("key-seen").focus();
+} end function open_key_capture
+
+function modifier(const string&: key) -> bool {
+    return key == "LeftShift" || key == "RightShift" || key == "LeftControl" || key == "RightControl" || key == "LeftAlt" || key == "RightAlt" || key == "LeftMeta" || key == "RightMeta" || key == "Shift" || key == "Control" || key == "Alt" || key == "Meta";
+} end function modifier
+
+function chord_of(grove::Event&: e) -> string {
+    string: c = "";
+    if (e.ctrl()) then {
+        c = c + "Ctrl+";
+    }
+    if (e.alt()) then {
+        c = c + "Alt+";
+    }
+    if (e.shift()) then {
+        c = c + "Shift+";
+    }
+    if (e.meta()) then {
+        c = c + "Meta+";
+    }
+    return c + e.key();
+} end function chord_of
+
+function typing_target(grove::Event&: e) -> bool {
+    string: t = e.target().tag();
+    return t == "input_string" || t == "input_integer" || t == "input_float" || t == "input_code";
+} end function typing_target
+
+function apply_captured(const string&: chord) -> void {
+    string: r = "";
+    if (key_target == "stop") then {
+        r = call("set", tab2("key_stop_all", chord));
+    } else if (key_target == "mic") then {
+        r = call("set", tab2("key_mic_toggle", chord));
+    } else if (key_target == "ptt") then {
+        r = call("set", tab2("key_push_to_talk", chord));
+    } else if (key_target == "sound") then {
+        r = call("keybind_set", tab2(edit_path, chord));
+    }
+    if (failed(r)) then {
+        set_text("key-for", reason(r));
+        set_text("key-seen", "\u{2026}");
+        return;
+    }
+    string: target = key_target;
+    key_target = "";
+    grove::get_by_id("key-modal").close_modal();
+    if (target == "sound") then {
+        grove::get_by_id("ed-key").set_inner_text(key_label(chord));
+        build_board();
+    }
+    load_settings_page();
+} end function apply_captured
+
+grove::document().on("key_down", [](grove::Event&: e) -> void {
+    string: key = e.key();
+    if (!key_target.empty()) then {
+        if (modifier(key)) then {
+            set_text("key-seen", chord_of(e).replace("+" + key, "+"));
+            return;
+        }
+        e.prevent_default();
+        if (key == "Escape") then {
+            grove::get_by_id("key-modal").close_modal();
+            key_target = "";
+            return;
+        }
+        if (key == "Backspace" || key == "Delete") then {
+            apply_captured("");
+            return;
+        }
+        string: chord = call("chord", chord_of(e));
+        if (chord.empty()) then {
+            set_text("key-seen", key + "?");
+            set_text("key-for", "Rustle can't use that key; try another one.");
+            return;
+        }
+        set_text("key-seen", chord);
+        apply_captured(chord);
+        return;
+    }
+    if (typing_target(e) || modifier(key)) then {
+        return;
+    }
+    if (edit_open && key == "Escape") then {
+        return;
+    }
+    string: owner = call("key", tab2(chord_of(e), "1"));
+    if (!owner.empty()) then {
+        e.prevent_default();
+        update_meters();
+        update_states();
+    }
+});
+
+grove::document().on("key_up", [](grove::Event&: e) -> void {
+    call("key_up", e.key());
+});
+
+
+grove::get_by_id("stop-all").on("click", [](grove::Event&: e) -> void {
+    call("stop_all", "");
+    update_states();
+});
+
+grove::get_by_id("mic-button").on("mouse_down", [](grove::Event&: e) -> void {
+    auto: f = call("meters", "").split("\t");
+    if (f.size() >= 8l && f[5] == "1" && f[7] == "1") then {
+        call("talk", "1");
+    }
+});
+
+grove::get_by_id("mic-button").on("mouse_up", [](grove::Event&: e) -> void {
+    auto: f = call("meters", "").split("\t");
+    if (f.size() >= 8l && f[5] == "1" && f[7] == "1") then {
+        call("talk", "0");
+    }
+});
+
+grove::get_by_id("mic-button").on("click", [](grove::Event&: e) -> void {
+    auto: f = call("meters", "").split("\t");
+    if (f.size() >= 8l && f[5] == "1" && f[7] == "1") then {
+        return;
+    }
+    bool: on = f.size() >= 8l && f[7] == "1";
+    call("set", tab2("mic_enabled", flag(!on)));
+    update_meters();
+});
+
+grove::get_by_id("notice-close").on("click", [](grove::Event&: e) -> void {
+    show("notice", false);
+    notice_time = 0.0;
+});
+
+grove::get_by_id("nav-back").on("click", [](grove::Event&: e) -> void {
+    if (view_mode != "folder") then {
+        view_mode = "folder";
+        query_text = "";
+        filling = true;
+        grove::get_by_id("search").set_value_string("");
+        filling = false;
+        build_board();
+        return;
+    }
+    if (!cur_folder.empty()) then {
+        enter_folder(parent_folder);
+    }
+});
+
+function search_changed(const string&: typed) -> void {
+    string: q = typed.trim();
+    if (q == query_text) then {
+        return;
+    }
+    query_text = q;
+    if (q.empty()) then {
+        view_mode = "folder";
+    } else then {
+        view_mode = "search";
+    }
+    build_board();
+} end function search_changed
+
+grove::get_by_id("search").on("input", [](grove::Event&: e) -> void {
+    if (filling) then {
+        return;
+    }
+    if (e.has_edit_text()) then {
+        search_changed(e.edit_text());
+    } else then {
+        search_changed(e.target().value_string());
+    }
+});
+
+grove::get_by_id("search").on("change", [](grove::Event&: e) -> void {
+    if (filling) then {
+        return;
+    }
+    search_changed(e.target().value_string());
+});
+
+grove::get_by_id("search").on("key_down", [](grove::Event&: e) -> void {
+    if (e.key() == "Escape") then {
+        filling = true;
+        e.target().set_value_string("");
+        filling = false;
+        search_changed("");
+    }
+});
+
+grove::get_by_id("show-favorites").on("click", [](grove::Event&: e) -> void {
+    set_mode("favorites");
+});
+
+grove::get_by_id("show-recent").on("click", [](grove::Event&: e) -> void {
+    set_mode("recent");
+});
+
+grove::get_by_id("sort").on("change", [](grove::Event&: e) -> void {
+    if (filling) then {
+        return;
+    }
+    call("set", tab2("sort", e.target().value_string()));
+    build_board();
+});
+
+grove::get_by_id("view").on("change", [](grove::Event&: e) -> void {
+    if (filling) then {
+        return;
+    }
+    view_kind = e.target().value_string();
+    call("set", tab2("view", view_kind));
+    build_board();
+});
+
+grove::get_by_id("overlap").on("change", [](grove::Event&: e) -> void {
+    if (filling) then {
+        return;
+    }
+    call("set", tab2("overlap", flag(e.target().value_bool())));
+});
+
+grove::get_by_id("quick-others").on("input", [](grove::Event&: e) -> void {
+    if (filling) then {
+        return;
+    }
+    call("set", tab2("others_volume", e.target().value_float().to_string()));
+});
+
+grove::get_by_id("quick-me").on("input", [](grove::Event&: e) -> void {
+    if (filling) then {
+        return;
+    }
+    call("set", tab2("me_volume", e.target().value_float().to_string()));
+});
+
+grove::get_by_id("voice").on("page_show", [](grove::Event&: e) -> void {
+    if (!voice_built) then {
+        build_voice();
+    } else then {
+        fill_presets();
+        refresh_voice();
+    }
+    auto: s = call("settings", "");
+    filling = true;
+    grove::get_by_id("voice-hear").set_value_bool(setting(s, "hear_myself") == "1");
+    filling = false;
+});
+
+grove::get_by_id("preset-select").on("change", [](grove::Event&: e) -> void {
+    if (filling) then {
+        return;
+    }
+    string: name = e.target().value_string();
+    string: r = call("preset_apply", name);
+    if (failed(r)) then {
+        toast("error", reason(r));
+    } else if (r.contains("\t")) then {
+        toast("info", reason(r));
+    }
+    refresh_voice();
+});
+
+grove::get_by_id("preset-save").on("click", [](grove::Event&: e) -> void {
+    grove::prompt_string("Save preset", "Name for these voice settings:", "", [](string: name) -> void {
+        string: r = call("preset_save", name.trim());
+        if (failed(r)) then {
+            toast("error", reason(r));
+            return;
+        }
+        fill_presets();
+        refresh_voice();
+        toast("info", "Saved the preset " + name.trim());
+    });
+});
+
+grove::get_by_id("preset-rename").on("click", [](grove::Event&: e) -> void {
+    string: current = grove::get_by_id("preset-select").value_string();
+    grove::prompt_string("Rename preset", "New name for " + current + ":", current, [current](string: name) -> void {
+        string: r = call("preset_rename", tab2(current, name.trim()));
+        if (failed(r)) then {
+            toast("error", reason(r));
+            return;
+        }
+        fill_presets();
+        refresh_voice();
+    });
+});
+
+grove::get_by_id("preset-delete").on("click", [](grove::Event&: e) -> void {
+    string: current = grove::get_by_id("preset-select").value_string();
+    grove::confirm("Delete preset", "Delete your preset " + current + "? Built-in presets can't be deleted.", [current](bool: yes) -> void {
+        if (!yes) then {
+            return;
+        }
+        string: r = call("preset_delete", current);
+        if (failed(r)) then {
+            toast("error", reason(r));
+            return;
+        }
+        fill_presets();
+        refresh_voice();
+    });
+});
+
+grove::get_by_id("voice-reset-all").on("click", [](grove::Event&: e) -> void {
+    call("voice_reset_all", "");
+    refresh_voice();
+    grove::get_by_id("preset-select").set_value_string("none");
+});
+
+grove::get_by_id("voice-hear").on("change", [](grove::Event&: e) -> void {
+    if (filling) then {
+        return;
+    }
+    call("set", tab2("hear_myself", flag(e.target().value_bool())));
+});
+
+grove::get_by_id("voice-mic").on("change", [](grove::Event&: e) -> void {
+    if (filling) then {
+        return;
+    }
+    call("set", tab2("mic_enabled", flag(e.target().value_bool())));
+});
+
+grove::get_by_id("output").on("page_show", [](grove::Event&: e) -> void {
+    load_output();
+});
+
+grove::get_by_id("auto-mode").on("change", [](grove::Event&: e) -> void {
+    if (filling) then {
+        return;
+    }
+    call("set", tab2("auto_mode", flag(e.target().value_bool())));
+    load_output();
+});
+
+grove::get_by_id("restart-audio").on("click", [](grove::Event&: e) -> void {
+    call("restart_audio", "");
+    load_output();
+});
+
+grove::get_by_id("dev-input").on("change", [](grove::Event&: e) -> void {
+    if (filling) then {
+        return;
+    }
+    call("set", tab2("input_device", e.target().value_string()));
+    load_output();
+});
+
+grove::get_by_id("dev-monitor").on("change", [](grove::Event&: e) -> void {
+    if (filling) then {
+        return;
+    }
+    call("set", tab2("monitor_device", e.target().value_string()));
+    load_output();
+});
+
+grove::get_by_id("dev-send").on("change", [](grove::Event&: e) -> void {
+    if (filling) then {
+        return;
+    }
+    call("set", tab2("send_device", e.target().value_string()));
+    load_output();
+});
+
+grove::get_by_id("vmic-on").on("change", [](grove::Event&: e) -> void {
+    if (filling) then {
+        return;
+    }
+    call("set", tab2("virtual_mic", flag(e.target().value_bool())));
+    load_output();
+});
+
+grove::get_by_id("vmic-keep").on("change", [](grove::Event&: e) -> void {
+    if (filling) then {
+        return;
+    }
+    call("set", tab2("keep_virtual_mic", flag(e.target().value_bool())));
+});
+
+grove::get_by_id("mic-enabled").on("change", [](grove::Event&: e) -> void {
+    if (filling) then {
+        return;
+    }
+    call("set", tab2("mic_enabled", flag(e.target().value_bool())));
+});
+
+grove::get_by_id("ptt").on("change", [](grove::Event&: e) -> void {
+    if (filling) then {
+        return;
+    }
+    call("set", tab2("push_to_talk", flag(e.target().value_bool())));
+});
+
+grove::get_by_id("hear-myself").on("change", [](grove::Event&: e) -> void {
+    if (filling) then {
+        return;
+    }
+    call("set", tab2("hear_myself", flag(e.target().value_bool())));
+});
+
+grove::get_by_id("to-others").on("change", [](grove::Event&: e) -> void {
+    if (filling) then {
+        return;
+    }
+    call("set", tab2("sounds_to_others", flag(e.target().value_bool())));
+});
+
+grove::get_by_id("to-me").on("change", [](grove::Event&: e) -> void {
+    if (filling) then {
+        return;
+    }
+    call("set", tab2("sounds_to_me", flag(e.target().value_bool())));
+});
+
+grove::get_by_id("mic-volume").on("input", [](grove::Event&: e) -> void {
+    if (filling) then {
+        return;
+    }
+    call("set", tab2("mic_volume", e.target().value_float().to_string()));
+});
+
+grove::get_by_id("hear-volume").on("input", [](grove::Event&: e) -> void {
+    if (filling) then {
+        return;
+    }
+    call("set", tab2("hear_myself_volume", e.target().value_float().to_string()));
+});
+
+grove::get_by_id("sounds-volume").on("input", [](grove::Event&: e) -> void {
+    if (filling) then {
+        return;
+    }
+    call("set", tab2("sounds_volume", e.target().value_float().to_string()));
+});
+
+grove::get_by_id("others-volume").on("input", [](grove::Event&: e) -> void {
+    if (filling) then {
+        return;
+    }
+    call("set", tab2("others_volume", e.target().value_float().to_string()));
+});
+
+grove::get_by_id("me-volume").on("input", [](grove::Event&: e) -> void {
+    if (filling) then {
+        return;
+    }
+    call("set", tab2("me_volume", e.target().value_float().to_string()));
+});
+
+grove::get_by_id("files").on("page_show", [](grove::Event&: e) -> void {
+    if (fb_path.empty()) then {
+        string: s = call("settings", "");
+        fb_path = setting(s, "browser_path");
+        filling = true;
+        grove::get_by_id("fb-hidden").set_value_bool(setting(s, "show_hidden") == "1");
+        filling = false;
+    }
+    fill_targets();
+    open_dir(fb_path);
+});
+
+grove::get_by_id("fb-up").on("click", [](grove::Event&: e) -> void {
+    auto: rows = call("list_dir", tab2(fb_path, "0")).split("\n");
+    if (rows.size() > 0l) then {
+        auto: f = rows[0].split("\t");
+        if (f.size() >= 3l && f[0] == "ok") then {
+            open_dir(f[2]);
+        }
+    }
+});
+
+grove::get_by_id("fb-hidden").on("change", [](grove::Event&: e) -> void {
+    if (filling) then {
+        return;
+    }
+    call("set", tab2("show_hidden", flag(e.target().value_bool())));
+    open_dir(fb_path);
+});
+
+grove::get_by_id("fb-path").on("key_down", [](grove::Event&: e) -> void {
+    if (e.key() == "Enter") then {
+        open_dir(e.target().value_string().trim());
+        e.prevent_default();
+    }
+});
+
+grove::get_by_id("fb-go").on("click", [](grove::Event&: e) -> void {
+    open_dir(grove::get_by_id("fb-path").value_string().trim());
+});
+
+grove::get_by_id("fb-add").on("click", [](grove::Event&: e) -> void {
+    string: r = call("add_folder", fb_path);
+    if (failed(r)) then {
+        toast("error", reason(r));
+        return;
+    }
+    toast("info", "Added " + fb_path + " to the library. Its sounds are on the Sounds page.");
+    open_dir(fb_path);
+    fill_targets();
+});
+
+grove::get_by_id("fb-newfolder").on("click", [](grove::Event&: e) -> void {
+    grove::prompt_string("New folder", "Name of the new folder in " + fb_path + ":", "", [](string: name) -> void {
+        string: r = call("mkdir", tab2(fb_path, name.trim()));
+        if (failed(r)) then {
+            toast("error", reason(r));
+            return;
+        }
+        open_dir(fb_path);
+        fill_targets();
+    });
+});
+
+grove::get_by_id("fb-copy").on("click", [](grove::Event&: e) -> void {
+    string: dest = grove::get_by_id("fb-target").value_string();
+    if (dest.empty()) then {
+        toast("error", "Pick a library folder to copy into. Add a folder to the library first if there isn't one.");
+        return;
+    }
+    if (selected_count() == 0l) then {
+        toast("error", "Tick the sound files you want to copy first.");
+        return;
+    }
+    string: r = call("copy_into", dest + "\t" + fb_selected);
+    if (failed(r)) then {
+        toast("error", reason(r));
+        return;
+    }
+    auto: f = r.split("\t");
+    string: msg = "Copied " + f[1] + " sound file(s) into your library.";
+    if (f.size() > 2l && !f[2].empty()) then {
+        msg = msg + " Skipped: " + f[2];
+    }
+    toast("info", msg);
+    fb_selected = "";
+    toggle_selected("", false);
+    open_dir(fb_path);
+});
+
+grove::get_by_id("settings").on("page_show", [](grove::Event&: e) -> void {
+    load_settings_page();
+});
+
+grove::get_by_id("rescan").on("click", [](grove::Event&: e) -> void {
+    call("rescan", "");
+    toast("info", "Looking for new sounds...");
+});
+
+grove::get_by_id("rescan-interval").on("change", [](grove::Event&: e) -> void {
+    if (filling) then {
+        return;
+    }
+    call("set", tab2("rescan_seconds", e.target().value_string()));
+});
+
+grove::get_by_id("key-stop").on("click", [](grove::Event&: e) -> void {
+    open_key_capture("stop", "The key that stops every sound that's playing.");
+});
+
+grove::get_by_id("key-mic").on("click", [](grove::Event&: e) -> void {
+    open_key_capture("mic", "The key that turns your microphone on and off.");
+});
+
+grove::get_by_id("key-ptt").on("click", [](grove::Event&: e) -> void {
+    open_key_capture("ptt", "Hold this key to talk while push to talk is on.");
+});
+
+grove::get_by_id("key-stop-clear").on("click", [](grove::Event&: e) -> void {
+    call("set", tab2("key_stop_all", ""));
+    load_settings_page();
+});
+
+grove::get_by_id("key-mic-clear").on("click", [](grove::Event&: e) -> void {
+    call("set", tab2("key_mic_toggle", ""));
+    load_settings_page();
+});
+
+grove::get_by_id("key-ptt-clear").on("click", [](grove::Event&: e) -> void {
+    call("set", tab2("key_push_to_talk", ""));
+    load_settings_page();
+});
+
+grove::get_by_id("global-keys").on("change", [](grove::Event&: e) -> void {
+    if (filling) then {
+        return;
+    }
+    call("set", tab2("global_hotkeys", flag(e.target().value_bool())));
+    update_hotkeys();
+});
+
+edit_field("volume");
+edit_field("speed");
+edit_field("tempo");
+edit_field("pitch");
+edit_field("reverb");
+edit_field("reverb_size");
+edit_field("trim_start");
+edit_field("trim_end");
+edit_field("fade_in");
+edit_field("fade_out");
+
+grove::get_by_id("ed-reverse").on("change", [](grove::Event&: e) -> void {
+    if (filling) then {
+        return;
+    }
+    call("edit_set", tab3(edit_path, "reverse", flag(e.target().value_bool())));
+});
+
+grove::get_by_id("ed-loop").on("change", [](grove::Event&: e) -> void {
+    if (filling) then {
+        return;
+    }
+    call("edit_set", tab3(edit_path, "loop", flag(e.target().value_bool())));
+});
+
+grove::get_by_id("ed-fav").on("click", [](grove::Event&: e) -> void {
+    bool: now = grove::get_by_id("ed-fav").inner_text() == "\u{2605}";
+    call("favorite", tab2(edit_path, flag(!now)));
+    if (now) then {
+        set_text("ed-fav", "\u{2606}");
+    } else then {
+        set_text("ed-fav", "\u{2605}");
+    }
+});
+
+grove::get_by_id("ed-preview").on("click", [](grove::Event&: e) -> void {
+    string: r = call("edit_preview", edit_path);
+    if (failed(r)) then {
+        toast("error", reason(r));
+    }
+});
+
+grove::get_by_id("ed-reset").on("click", [](grove::Event&: e) -> void {
+    call("edit_reset", edit_path);
+    open_edit(edit_path);
+});
+
+grove::get_by_id("ed-key").on("click", [](grove::Event&: e) -> void {
+    open_key_capture("sound", "Pressing this key plays " + grove::get_by_id("ed-name").inner_text() + ", or stops it while it plays.");
+});
+
+grove::get_by_id("ed-key-clear").on("click", [](grove::Event&: e) -> void {
+    call("keybind_set", tab2(edit_path, ""));
+    grove::get_by_id("ed-key").set_inner_text(key_label(""));
+});
+
+grove::get_by_id("edit-modal").on("close", [](grove::Event&: e) -> void {
+    edit_open = false;
+    build_board();
+});
+
+grove::get_by_id("key-modal").on("close", [](grove::Event&: e) -> void {
+    key_target = "";
+});
+
+string: startup = call("settings", "");
+view_kind = setting(startup, "view");
+filling = true;
+grove::get_by_id("sort").set_value_string(setting(startup, "sort"));
+grove::get_by_id("view").set_value_string(view_kind);
+grove::get_by_id("overlap").set_value_bool(setting(startup, "overlap") == "1");
+grove::get_by_id("quick-others").set_value_float(to_float(setting(startup, "others_volume")));
+grove::get_by_id("quick-me").set_value_float(to_float(setting(startup, "me_volume")));
+filling = false;
+cur_folder = setting(startup, "last_folder");
+lib_rev = call("lib_state", "").split("\t")[0];
+build_board();
+update_vmic_pill();
+string: start_page = setting(startup, "start_page");
+if (!start_page.empty()) then {
+    grove::navigate(start_page);
+}
+
+grove::set_interval(100.0, []() -> void {
+    update_meters();
+    if (grove::get_by_id("sounds").is_current()) then {
+        update_states();
+    }
+});
+
+grove::set_interval(1000.0, []() -> void {
+    check_library();
+    update_notices();
+    if (grove::get_by_id("output").is_current()) then {
+        update_route();
+    }
+});
+
+grove::set_interval(4000.0, []() -> void {
+    if (!grove::get_by_id("output").is_current()) then {
+        update_vmic_pill();
+    }
+});

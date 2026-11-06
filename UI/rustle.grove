@@ -1,0 +1,295 @@
+<!grove max-fps=60 idle-fps=12>
+<grove>
+    <head>
+        <title>Rustle</title>
+        <style src="rustle.bark"></style>
+        <script lang="walnut" src="rustle.wal"></script>
+    </head>
+    <body id="app" title="Rustle" app-id="rustle" icon="icons/rustle-64.png icons/rustle-256.png">
+        <row class="appbar">
+            <text class="brand">&#9835; Rustle</text>
+            <button class="tab" to="sounds">Sounds</button>
+            <button class="tab" to="voice">Voice</button>
+            <button class="tab" to="output">Output</button>
+            <button class="tab" to="files">Files</button>
+            <button class="tab" to="settings">Settings</button>
+            <div class="spacer"></div>
+            <row id="vmic-pill" class="pill" to="output">
+                <text class="dot">&#9679;</text>
+                <text id="vmic-pill-text">Rustle Mic</text>
+            </row>
+            <button id="mic-button" class="mic-button">Mic on</button>
+            <column class="mini-meter-box">
+                <div id="mini-meter" class="mini-meter"><div id="mini-meter-fill" class="mini-fill"></div></div>
+                <text id="mini-meter-label" class="mini-label">mic</text>
+            </column>
+            <button id="stop-all" class="danger">&#9632; Stop all</button>
+        </row>
+        <row id="notice" class="notice hidden">
+            <div id="notice-text" class="grow"></div>
+            <button id="notice-close" class="ghost small-button">Dismiss</button>
+        </row>
+
+        <page id="sounds" current>
+            <row class="toolbar">
+                <button id="nav-back" class="ghost icon-button" title="Up one folder">&#8592;</button>
+                <row id="crumbs" class="crumbs"></row>
+                <div class="spacer"></div>
+                <input_string id="search" class="search" placeholder="Search all sounds" />
+                <button id="show-favorites" class="ghost">&#9733; Favorites</button>
+                <button id="show-recent" class="ghost">Most played</button>
+                <input_select id="sort" class="sort" value="name">
+                    <option value="name">Name</option>
+                    <option value="duration">Length</option>
+                    <option value="newest">Newest</option>
+                    <option value="played">Most played</option>
+                </input_select>
+                <input_select id="view" class="view-select" value="tiles">
+                    <option value="tiles">Tiles</option>
+                    <option value="list">List</option>
+                </input_select>
+            </row>
+            <column id="board" class="scroll board">
+                <column id="welcome" class="card welcome hidden">
+                    <div class="card-title">START HERE</div>
+                    <div class="big">Add a folder of sounds</div>
+                    <p class="hint">Rustle plays any WAV, FLAC, MP3, Ogg, Opus, AAC or M4A file, and the sound of MP4, MKV and WebM videos. Pick a folder with Rustle's own file browser; its subfolders show up here and you can click into them.</p>
+                    <row class="actions">
+                        <button class="primary" to="files">Browse for a folder</button>
+                    </row>
+                </column>
+                <div id="folder-title" class="section-title hidden">Folders</div>
+                <row id="folders" class="folder-grid"></row>
+                <div id="sound-title" class="section-title hidden">Sounds</div>
+                <row id="tiles" class="tile-grid"></row>
+                <column id="list" class="sound-list"></column>
+                <div id="board-empty" class="empty hidden"></div>
+            </column>
+            <row class="toolbar bottom nowbar">
+                <text id="now-playing" class="now grow">Nothing playing</text>
+                <input_bool id="overlap" switch checked>Let sounds overlap</input_bool>
+                <text class="muted">To others</text>
+                <input_slider id="quick-others" class="quick-slider" min="0" max="2" step="0.05" value="1" />
+                <text class="muted">To me</text>
+                <input_slider id="quick-me" class="quick-slider" min="0" max="2" step="0.05" value="0.8" />
+            </row>
+        </page>
+
+        <page id="voice">
+            <row class="toolbar">
+                <text class="muted">Preset</text>
+                <input_select id="preset-select" class="preset-select" value="none"><option value="none">No effects (your normal voice)</option></input_select>
+                <button id="preset-save" class="ghost">Save as&#8230;</button>
+                <button id="preset-rename" class="ghost">Rename&#8230;</button>
+                <button id="preset-delete" class="ghost">Delete</button>
+                <div class="spacer"></div>
+                <text id="voice-summary" class="muted"></text>
+                <button id="voice-reset-all" class="ghost">Reset everything</button>
+            </row>
+            <row class="voice-meters">
+                <text class="meter-name">Your mic</text>
+                <div class="meter"><div id="vm-in" class="meter-fill"></div></div>
+                <text class="meter-name">After effects</text>
+                <div class="meter"><div id="vm-out" class="meter-fill"></div></div>
+                <input_bool id="voice-hear" switch>Hear myself</input_bool>
+                <input_bool id="voice-mic" switch checked>Mic on</input_bool>
+            </row>
+            <column id="voice-board" class="scroll page-body"></column>
+        </page>
+
+        <page id="output">
+            <column class="scroll page-body">
+                <row class="cards">
+                    <column class="card">
+                        <row class="card-head">
+                            <div class="card-title">QUICK SETUP</div>
+                            <div class="spacer"></div>
+                            <input_bool id="auto-mode" switch checked>Automatic</input_bool>
+                        </row>
+                        <p id="auto-hint" class="hint">Automatic picks your default microphone and speakers, makes the Rustle Mic, and fixes things if a device goes away.</p>
+                        <row class="status-row"><text id="st-vmic-dot" class="status-dot">&#9679;</text><text class="k">Rustle Mic</text><text id="st-vmic" class="v"></text></row>
+                        <row class="status-row"><text id="st-mic-dot" class="status-dot">&#9679;</text><text class="k">Microphone</text><text id="st-mic" class="v"></text></row>
+                        <row class="status-row"><text id="st-send-dot" class="status-dot">&#9679;</text><text class="k">To others</text><text id="st-send" class="v"></text></row>
+                        <row class="status-row"><text id="st-mon-dot" class="status-dot">&#9679;</text><text class="k">To me</text><text id="st-mon" class="v"></text></row>
+                        <div id="st-problem" class="warning hidden"></div>
+                        <row class="actions">
+                            <button id="restart-audio" class="ghost">Restart audio</button>
+                            <text id="st-server" class="muted"></text>
+                        </row>
+                    </column>
+                    <column class="card">
+                        <div class="card-title">LEVELS</div>
+                        <row class="meter-row"><text class="meter-name">Microphone</text><div class="meter"><div id="m-mic" class="meter-fill"></div></div></row>
+                        <row class="meter-row"><text class="meter-name">Your voice</text><div class="meter"><div id="m-voice" class="meter-fill"></div></div></row>
+                        <row class="meter-row"><text class="meter-name">To others</text><div class="meter"><div id="m-send" class="meter-fill"></div></div></row>
+                        <row class="meter-row"><text class="meter-name">To me</text><div class="meter"><div id="m-mon" class="meter-fill"></div></div></row>
+                        <p class="hint">Say something: the first two bars should move. Play a sound: the last two should.</p>
+                    </column>
+                </row>
+                <column id="howto" class="card hint-card">
+                    <div class="card-title">USING RUSTLE MIC</div>
+                    <p id="howto-text" class="hint">In Discord open User Settings, Voice &amp; Video, and choose "Rustle Mic" as the input device. In OBS add an Audio Input Capture source and pick "Rustle Mic". In games and other apps, pick "Rustle Mic" wherever they ask for a microphone. Everyone then hears your voice through the voice changer, plus your soundboard.</p>
+                    <p class="hint">Turn off noise suppression (Krisp) and automatic gain in Discord if sounds get cut off, since they treat the soundboard as background noise.</p>
+                </column>
+                <row class="cards">
+                    <column class="card">
+                        <div class="card-title">MICROPHONE</div>
+                        <row class="field"><text class="label">Use</text><input_select id="dev-input" class="device-select" value=""><option value="">Default microphone</option></input_select></row>
+                        <row class="field"><text class="label"></text><input_bool id="mic-enabled" switch checked>Send my voice</input_bool></row>
+                        <row class="field"><text class="label"></text><input_bool id="ptt" switch>Push to talk</input_bool></row>
+                        <row class="field"><text class="label">Voice volume</text><input_slider id="mic-volume" class="level-slider" min="0" max="2" step="0.05" value="1" /></row>
+                        <row class="field"><text class="label"></text><input_bool id="hear-myself" switch>Hear myself (use headphones)</input_bool></row>
+                        <row class="field"><text class="label">Hear myself at</text><input_slider id="hear-volume" class="level-slider" min="0" max="2" step="0.05" value="0.7" /></row>
+                        <p id="ptt-hint" class="hint"></p>
+                    </column>
+                    <column class="card">
+                        <div class="card-title">SOUNDS</div>
+                        <row class="field"><text class="label">All sounds</text><input_slider id="sounds-volume" class="level-slider" min="0" max="2" step="0.05" value="1" /></row>
+                        <row class="field"><text class="label"></text><input_bool id="to-others" switch checked>Play sounds to others</input_bool></row>
+                        <row class="field"><text class="label">To others</text><input_slider id="others-volume" class="level-slider" min="0" max="2" step="0.05" value="1" /></row>
+                        <row class="field"><text class="label"></text><input_bool id="to-me" switch checked>Play sounds to me</input_bool></row>
+                        <row class="field"><text class="label">To me</text><input_slider id="me-volume" class="level-slider" min="0" max="2" step="0.05" value="0.8" /></row>
+                        <row class="field"><text class="label">Speakers</text><input_select id="dev-monitor" class="device-select" value=""><option value="">Default speakers or headphones</option></input_select></row>
+                    </column>
+                </row>
+                <column class="card">
+                    <div class="card-title">SENDING TO OTHER PROGRAMS</div>
+                    <row class="field"><text class="label"></text><input_bool id="vmic-on" switch checked>Make the Rustle Mic</input_bool></row>
+                    <row class="field"><text class="label"></text><input_bool id="vmic-keep" switch>Keep Rustle Mic after Rustle closes</input_bool></row>
+                    <row class="field"><text class="label">Or send to</text><input_select id="dev-send" class="device-select" value=""><option value="">Nowhere else</option></input_select></row>
+                    <p id="vmic-hint" class="hint"></p>
+                </column>
+            </column>
+        </page>
+
+        <page id="files">
+            <row class="files-layout">
+                <column class="places">
+                    <div class="card-title">PLACES</div>
+                    <column id="places" class="place-list"></column>
+                    <div class="card-title spaced">YOUR LIBRARY</div>
+                    <column id="lib-roots" class="place-list"></column>
+                </column>
+                <column class="browser">
+                    <row class="toolbar">
+                        <button id="fb-up" class="ghost icon-button" title="Up one folder">&#8593;</button>
+                        <row id="fb-crumbs" class="crumbs"></row>
+                        <div class="spacer"></div>
+                        <input_bool id="fb-hidden" switch>Hidden files</input_bool>
+                    </row>
+                    <row class="toolbar slim">
+                        <input_string id="fb-path" class="path-input" placeholder="Type a path and press Enter" />
+                        <button id="fb-go" class="ghost">Go</button>
+                        <button id="fb-newfolder" class="ghost">New folder&#8230;</button>
+                    </row>
+                    <column id="fb-list" class="scroll file-list"></column>
+                    <row class="toolbar bottom wrap-bar">
+                        <text id="fb-status" class="muted grow"></text>
+                        <button id="fb-add" class="primary">Add this folder to the library</button>
+                    </row>
+                    <row class="toolbar bottom wrap-bar">
+                        <text id="fb-selected" class="muted">Tick sound files to copy them into your library</text>
+                        <div class="spacer"></div>
+                        <text class="muted">Copy into</text>
+                        <input_select id="fb-target" class="target-select" placeholder="Pick a library folder"><option value="">No library folders yet</option></input_select>
+                        <button id="fb-copy" class="ghost">Copy</button>
+                    </row>
+                </column>
+            </row>
+        </page>
+
+        <page id="settings">
+            <column class="scroll page-body">
+                <row class="cards">
+                    <column class="card">
+                        <div class="card-title">SOUND FOLDERS</div>
+                        <column id="root-list" class="root-list"></column>
+                        <row class="actions">
+                            <button class="primary" to="files">Add a folder&#8230;</button>
+                            <button id="rescan" class="ghost">Look for new sounds now</button>
+                        </row>
+                        <row class="field"><text class="label">Check for changes</text><input_select id="rescan-interval" class="small-select" value="3">
+                            <option value="0">Only when I ask</option>
+                            <option value="3">Every 3 seconds</option>
+                            <option value="15">Every 15 seconds</option>
+                            <option value="60">Every minute</option>
+                        </input_select></row>
+                    </column>
+                    <column class="card">
+                        <div class="card-title">KEYS</div>
+                        <row class="field"><text class="label">Stop all sounds</text><button id="key-stop" class="key-button"></button><button id="key-stop-clear" class="ghost small-button">Clear</button></row>
+                        <row class="field"><text class="label">Mic on / off</text><button id="key-mic" class="key-button"></button><button id="key-mic-clear" class="ghost small-button">Clear</button></row>
+                        <row class="field"><text class="label">Push to talk</text><button id="key-ptt" class="key-button"></button><button id="key-ptt-clear" class="ghost small-button">Clear</button></row>
+                        <row class="field"><text class="label"></text><input_bool id="global-keys" switch>Work in other programs too (global hotkeys)</input_bool></row>
+                        <p id="hotkey-report" class="hint"></p>
+                    </column>
+                </row>
+                <column class="card">
+                    <div class="card-title">SOUND KEYS</div>
+                    <p class="hint">Give a sound a key from its editor (the &#9998; button on its tile). Pressing the key plays it, or stops it while it plays.</p>
+                    <column id="sound-keys" class="key-list"></column>
+                </column>
+                <column class="card">
+                    <div class="card-title">FROM THE COMMAND LINE</div>
+                    <p id="ctl-hint" class="hint"></p>
+                    <pre class="preview mono">rustle ctl stop-all
+rustle ctl toggle-mic
+rustle ctl ptt-down     rustle ctl ptt-up
+rustle ctl play "air horn"
+rustle ctl preset robot</pre>
+                </column>
+                <column class="card">
+                    <div class="card-title">ABOUT</div>
+                    <row class="kv"><text class="k">Version</text><text id="about-version" class="v"></text></row>
+                    <row class="kv"><text class="k">Settings</text><text id="about-config" class="v mono"></text></row>
+                    <row class="kv"><text class="k">Sound system</text><text id="about-backend" class="v"></text></row>
+                </column>
+            </column>
+        </page>
+
+        <modal id="edit-modal" width="600">
+            <row class="modal-head">
+                <column class="grow">
+                    <div id="ed-name" class="big"></div>
+                    <div id="ed-file" class="muted"></div>
+                </column>
+                <button id="ed-fav" class="ghost star">&#9734;</button>
+            </row>
+            <column class="edit-body">
+                <row class="field"><text class="label">Volume (×)</text><input_slider id="ed-volume" class="edit-slider" min="0" max="2" step="0.01" /><button id="ed-volume-r" class="reset" title="Reset">&#8634;</button></row>
+                <row class="field"><text class="label">Speed (×)</text><input_slider id="ed-speed" class="edit-slider" min="0.25" max="4" step="0.05" /><button id="ed-speed-r" class="reset" title="Reset">&#8634;</button></row>
+                <row class="field"><text class="label">Stretch (×)</text><input_slider id="ed-tempo" class="edit-slider" min="0.25" max="4" step="0.05" /><button id="ed-tempo-r" class="reset" title="Reset">&#8634;</button></row>
+                <row class="field"><text class="label">Pitch (st)</text><input_slider id="ed-pitch" class="edit-slider" min="-24" max="24" step="0.5" /><button id="ed-pitch-r" class="reset" title="Reset">&#8634;</button></row>
+                <row class="field"><text class="label">Reverb</text><input_slider id="ed-reverb" class="edit-slider" min="0" max="1" step="0.01" /><button id="ed-reverb-r" class="reset" title="Reset">&#8634;</button></row>
+                <row class="field"><text class="label">Room size</text><input_slider id="ed-reverb_size" class="edit-slider" min="0" max="1" step="0.01" /><button id="ed-reverb_size-r" class="reset" title="Reset">&#8634;</button></row>
+                <row class="field"><text class="label">Start at (s)</text><input_slider id="ed-trim_start" class="edit-slider" min="0" max="10" step="0.01" /><button id="ed-trim_start-r" class="reset" title="Reset">&#8634;</button></row>
+                <row class="field"><text class="label">End at (0 = end)</text><input_slider id="ed-trim_end" class="edit-slider" min="0" max="10" step="0.01" /><button id="ed-trim_end-r" class="reset" title="Reset">&#8634;</button></row>
+                <row class="field"><text class="label">Fade in (s)</text><input_slider id="ed-fade_in" class="edit-slider" min="0" max="5" step="0.05" /><button id="ed-fade_in-r" class="reset" title="Reset">&#8634;</button></row>
+                <row class="field"><text class="label">Fade out (s)</text><input_slider id="ed-fade_out" class="edit-slider" min="0" max="5" step="0.05" /><button id="ed-fade_out-r" class="reset" title="Reset">&#8634;</button></row>
+                <row class="switches">
+                    <input_bool id="ed-reverse" switch>Reverse</input_bool>
+                    <input_bool id="ed-loop" switch>Loop</input_bool>
+                </row>
+                <p class="hint">Speed changes speed and pitch together, like a record. Stretch changes only the speed and Pitch only the pitch. Changes are saved for this sound and don't touch the file.</p>
+                <row class="field"><text class="label">Key</text><button id="ed-key" class="key-button"></button><button id="ed-key-clear" class="ghost small-button">Clear</button></row>
+            </column>
+            <row class="modal-actions">
+                <button id="ed-reset" class="ghost">Reset all</button>
+                <div class="spacer"></div>
+                <button id="ed-preview" class="ghost">&#9654; Preview</button>
+                <button id="ed-done" class="primary" to="close">Done</button>
+            </row>
+        </modal>
+
+        <modal id="key-modal" width="420">
+            <div class="big">Press a key</div>
+            <p id="key-for" class="hint"></p>
+            <div id="key-seen" class="key-seen" tabindex="0">&#8230;</div>
+            <p class="hint">Hold Ctrl, Alt or Shift with it if you like. Escape cancels, Backspace clears the key.</p>
+            <row class="modal-actions">
+                <div class="spacer"></div>
+                <button id="key-cancel" class="ghost" to="close">Cancel</button>
+            </row>
+        </modal>
+    </body>
+</grove>

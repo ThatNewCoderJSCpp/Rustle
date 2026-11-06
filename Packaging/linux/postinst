@@ -1,0 +1,12 @@
+#!/bin/sh
+set -e
+mkdir -p /usr/bin /usr/share/applications /usr/share/icons/hicolor/scalable/apps /usr/share/icons/hicolor/512x512/apps
+for exe in rustle; do
+    ln -sf /opt/rustle/$exe /usr/bin/$exe
+done
+ln -sf /opt/rustle/share/applications/rustle.desktop /usr/share/applications/rustle.desktop
+ln -sf /opt/rustle/share/icons/hicolor/scalable/apps/rustle.svg /usr/share/icons/hicolor/scalable/apps/rustle.svg
+ln -sf /opt/rustle/share/icons/hicolor/512x512/apps/rustle.png /usr/share/icons/hicolor/512x512/apps/rustle.png
+if command -v update-desktop-database > /dev/null 2>&1; then update-desktop-database -q /usr/share/applications || true; fi
+if command -v gtk-update-icon-cache > /dev/null 2>&1; then gtk-update-icon-cache -q -t /usr/share/icons/hicolor || true; fi
+exit 0

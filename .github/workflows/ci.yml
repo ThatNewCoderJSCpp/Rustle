@@ -1,0 +1,57 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - dev
+      - main
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  linux:
+    name: Build and test on Linux
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build pkg-config xvfb \
+            libx11-dev libxft-dev libxrender-dev libfontconfig1-dev libfreetype-dev \
+            libssl-dev libpango1.0-dev libcairo2-dev zlib1g-dev libjpeg-dev \
+            libvulkan-dev libgl-dev
+
+      - name: Configure
+        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DFIZMO_TUNE=OFF
+
+      - name: Build
+        timeout-minutes: 100
+        run: cmake --build build -j 4
+
+      - name: Test
+        timeout-minutes: 20
+        working-directory: build
+        run: ctest --output-on-failure --timeout 600
+
+      - name: Check the window, its script and the audio code
+        env:
+          FIZMO_AUDIO_BACKEND: "null"
+        run: |
+          build/bin/rustle --version
+          build/bin/rustle --check | tee check.txt
+          grep "built-in window ok, 1 compiled script" check.txt
+          grep "neutral is transparent" check.txt
+          if [ -x build/bin/grove ]; then build/bin/grove check UI/rustle.grove; fi
+          mkdir -p smoke
+          RUSTLE_CONFIG_DIR=$PWD/smoke RUSTLE_CONTROL_SOCKET=$PWD/smoke/ctl.sock timeout 20 xvfb-run -a build/bin/rustle > smoke/run.log 2>&1 || status=$?
+          cat smoke/run.log
+          if [ "${status:-0}" != "124" ]; then
+            echo "::error::rustle should keep its window open until it's closed (exit status ${status:-0})"
+            exit 1
+          fi
