@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.18)
-project(rustle VERSION 0.1.0 DESCRIPTION "Rustle: a soundboard and voice changer for Linux, Windows and macOS built with Fizmo, Grove and Walnut" LANGUAGES C CXX)
+project(rustle VERSION 1.0.1 DESCRIPTION "Rustle: a soundboard and voice changer for Linux, Windows and macOS built with Fizmo, Grove and Walnut" LANGUAGES C CXX)
 
 if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
     set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)
@@ -12,9 +12,9 @@ option(RUSTLE_BUILD_APP "Build the Grove app (turn off to build only the rustle 
 option(RUSTLE_BUILD_TESTS "Build the Rustle tests" ON)
 option(RUSTLE_PACKAGE "Make release packages: rustle with its window and compiled script built in, linked so it runs without a compiler" OFF)
 option(RUSTLE_BUNDLE "Run rustle-host --bundle as part of the build to make rustle with its window built in (turn off when cross-compiling, then bundle on the target)" ON)
-set(RUSTLE_FIZMO_TAG "v0.4.1" CACHE STRING "Fizmo git tag to fetch (needs the audio component)")
-set(RUSTLE_GROVE_TAG "v0.3.1" CACHE STRING "Grove git tag to fetch")
-set(RUSTLE_WALNUT_TAG "v0.3.0" CACHE STRING "Walnut git tag Grove fetches")
+set(RUSTLE_FIZMO_TAG "v1.4.6" CACHE STRING "Fizmo git tag to fetch (needs the audio component)")
+set(RUSTLE_GROVE_TAG "v1.1.3" CACHE STRING "Grove git tag to fetch")
+set(RUSTLE_WALNUT_TAG "v1.2.2" CACHE STRING "Walnut git tag Grove fetches")
 
 if(NOT CMAKE_RUNTIME_OUTPUT_DIRECTORY)
     set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
