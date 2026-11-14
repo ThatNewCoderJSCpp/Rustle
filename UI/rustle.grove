@@ -9,6 +9,7 @@
         <row class="appbar">
             <text class="brand">&#9835; Rustle</text>
             <button class="tab" to="sounds">Sounds</button>
+            <button class="tab" to="music">Music</button>
             <button class="tab" to="voice">Voice</button>
             <button class="tab" to="output">Output</button>
             <button class="tab" to="files">Files</button>
@@ -72,6 +73,68 @@
                 <input_slider id="quick-others" class="quick-slider" min="0" max="2" step="0.05" value="1" />
                 <text class="muted">To me</text>
                 <input_slider id="quick-me" class="quick-slider" min="0" max="2" step="0.05" value="0.8" />
+            </row>
+        </page>
+
+        <page id="music">
+            <row class="player">
+                <column class="np grow">
+                    <text id="mu-title" class="np-title">Nothing playing</text>
+                    <text id="mu-sub" class="muted">Add songs or folders to the queue, or play a playlist</text>
+                    <row class="seek-row">
+                        <text id="mu-pos" class="clock">0:00</text>
+                        <input_slider id="mu-seek" class="seek" min="0" max="1" step="0.1" value="0" />
+                        <text id="mu-len" class="clock">0:00</text>
+                    </row>
+                </column>
+                <row class="transport">
+                    <button id="mu-shuffle" class="ghost mode-button" title="Pick the next song at random">Shuffle</button>
+                    <button id="mu-prev" class="ghost round" title="Previous song (or back to the start)">&#9664;&#9664;</button>
+                    <button id="mu-play" class="primary round play-button" title="Play or pause">&#9654;</button>
+                    <button id="mu-next" class="ghost round" title="Next song">&#9654;&#9654;</button>
+                    <button id="mu-repeat" class="ghost mode-button" title="Repeat off, the whole queue, or one song">Repeat off</button>
+                </row>
+                <column class="music-levels">
+                    <row class="field"><text class="label short">Volume</text><input_slider id="mu-volume" class="quick-slider" min="0" max="2" step="0.05" value="0.7" /></row>
+                    <row class="music-switches">
+                        <input_bool id="mu-to-others" switch checked>To others</input_bool>
+                        <input_bool id="mu-to-me" switch checked>To me</input_bool>
+                    </row>
+                </column>
+            </row>
+            <row class="music-layout">
+                <column class="pl-side">
+                    <row class="side-head">
+                        <div class="card-title">PLAYLISTS</div>
+                        <div class="spacer"></div>
+                        <button id="pl-new" class="ghost small-button">New&#8230;</button>
+                    </row>
+                    <button id="mv-queue" class="place current">&#9835;  Queue</button>
+                    <column id="pl-list" class="place-list"></column>
+                </column>
+                <column class="music-main">
+                    <row class="toolbar">
+                        <row id="mv-crumbs" class="crumbs"></row>
+                        <text id="mv-count" class="muted"></text>
+                        <div class="spacer"></div>
+                        <row id="queue-actions" class="bar-actions">
+                            <button id="mq-add" class="primary">Add music&#8230;</button>
+                            <button id="mq-clear-played" class="ghost">Clear played</button>
+                            <button id="mq-clear" class="ghost">Clear queue</button>
+                        </row>
+                        <row id="pl-actions" class="bar-actions hidden">
+                            <button id="pl-play" class="primary">&#9654; Play</button>
+                            <button id="pl-shuffle" class="ghost">Shuffle play</button>
+                            <button id="pl-queue" class="ghost">Add to queue</button>
+                            <button id="pl-add" class="ghost">Add music&#8230;</button>
+                            <button id="pl-group" class="ghost">New folder&#8230;</button>
+                            <button id="pl-rename" class="ghost">Rename&#8230;</button>
+                            <button id="pl-delete" class="ghost">Delete</button>
+                        </row>
+                    </row>
+                    <column id="music-list" class="scroll music-list"></column>
+                    <div id="music-empty" class="empty hidden"></div>
+                </column>
             </row>
         </page>
 
@@ -220,6 +283,9 @@
                         <row class="field"><text class="label">Stop all sounds</text><button id="key-stop" class="key-button"></button><button id="key-stop-clear" class="ghost small-button">Clear</button></row>
                         <row class="field"><text class="label">Mic on / off</text><button id="key-mic" class="key-button"></button><button id="key-mic-clear" class="ghost small-button">Clear</button></row>
                         <row class="field"><text class="label">Push to talk</text><button id="key-ptt" class="key-button"></button><button id="key-ptt-clear" class="ghost small-button">Clear</button></row>
+                        <row class="field"><text class="label">Music play / pause</text><button id="key-mtoggle" class="key-button"></button><button id="key-mtoggle-clear" class="ghost small-button">Clear</button></row>
+                        <row class="field"><text class="label">Next song</text><button id="key-mnext" class="key-button"></button><button id="key-mnext-clear" class="ghost small-button">Clear</button></row>
+                        <row class="field"><text class="label">Previous song</text><button id="key-mprev" class="key-button"></button><button id="key-mprev-clear" class="ghost small-button">Clear</button></row>
                         <row class="field"><text class="label"></text><input_bool id="global-keys" switch>Work in other programs too (global hotkeys)</input_bool></row>
                         <p id="hotkey-report" class="hint"></p>
                     </column>
@@ -236,7 +302,11 @@
 rustle ctl toggle-mic
 rustle ctl ptt-down     rustle ctl ptt-up
 rustle ctl play "air horn"
-rustle ctl preset robot</pre>
+rustle ctl preset robot
+rustle ctl music-toggle     rustle ctl music-next     rustle ctl music-prev
+rustle ctl music-shuffle on     rustle ctl music-repeat all
+rustle ctl music-add ~/Music/Album
+rustle ctl music-shuffle-playlist "road trip"</pre>
                 </column>
                 <column class="card">
                     <div class="card-title">ABOUT</div>
@@ -278,6 +348,33 @@ rustle ctl preset robot</pre>
                 <div class="spacer"></div>
                 <button id="ed-preview" class="ghost">&#9654; Preview</button>
                 <button id="ed-done" class="primary" to="close">Done</button>
+            </row>
+        </modal>
+
+        <modal id="music-picker" width="780">
+            <row class="modal-head">
+                <column class="grow">
+                    <div class="big">Add music</div>
+                    <div id="mp-target" class="muted"></div>
+                </column>
+            </row>
+            <row class="picker-body">
+                <column id="mp-places" class="place-list picker-places"></column>
+                <column class="picker-main">
+                    <row class="toolbar slim">
+                        <button id="mp-up" class="ghost icon-button" title="Up one folder">&#8593;</button>
+                        <input_string id="mp-path" class="path-input" placeholder="Type a path and press Enter" />
+                        <button id="mp-go" class="ghost">Go</button>
+                    </row>
+                    <column id="mp-list" class="scroll file-list picker-list"></column>
+                </column>
+            </row>
+            <p class="hint">Tick folders and songs, then add them. A folder plays its songs in order (its subfolders after its own songs), unless Shuffle is on.</p>
+            <row class="modal-actions">
+                <text id="mp-status" class="muted grow"></text>
+                <button id="mp-add-folder" class="ghost">Add this whole folder</button>
+                <button id="mp-add-picked" class="primary">Add ticked</button>
+                <button id="mp-done" class="ghost" to="close">Done</button>
             </row>
         </modal>
 

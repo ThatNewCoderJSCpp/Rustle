@@ -8,12 +8,14 @@ Rustle makes a virtual microphone called **Rustle Mic**. Pick it as your microph
 
 - **Sounds**: add one or more folders and browse them the way they are on disk. Folders show up as cards you click into; a breadcrumb bar and the back button take you up again. Every sound is a tile (or a row, in list view) with its length, its key and a progress bar while it plays. Click to play, click again to stop. Search looks through the whole library at once, and there's a Favorites view, a Most played view and sorting by name, length, newest or most played. Rustle plays WAV, FLAC, MP3, Ogg Vorbis, Opus, AAC and M4A files, and the sound of MP4, MOV, MKV and WebM videos. New and changed files are picked up on their own every few seconds (or when you press the button, if you'd rather).
 - **Sound editing**: every sound has its own speed (faster and higher, like a record), stretch (faster without changing the pitch), pitch, reverse, reverb with a room size, volume, start and end points, fade in and out, and loop. Edits never touch the file; Rustle keeps them in its settings and renders the sound when it's played (and caches the result).
+- **Music**: a music player next to the soundboard. Add songs and whole folders to a queue (with Rustle's own file browser), then play, pause, skip, go back, seek, shuffle and repeat (off, the whole queue, or one song). A folder plays its songs in order, then its subfolders, unless Shuffle is on. Every song in the queue plays once; played songs are dimmed and *Clear played* takes them out, and *Repeat all* starts a fresh round when the queue runs out. Shuffle picks at random from everything left in the queue, songs and folders alike (a picked folder then picks one of its own songs or subfolders the same way), using Fizmo's secure random numbers. Music has its own volume and its own *to others* and *to me* switches, so it can go into Rustle Mic for a voice chat or just to your headphones. *Stop all* only stops soundboard sounds; the music keeps going until you pause it.
+- **Playlists**: playlists live in Rustle, not on disk. Each one can hold songs, whole folders (read again from disk every time you play the playlist, so new songs show up) and folders of its own, nested as deep as you like. Play a playlist, shuffle-play it, or add it (or any folder or song in it) to the queue.
 - **Voice**: 22 effects in one panel, all off until you touch them: noise gate, noise reduction, low cut, pitch (with fine tune, formant keeping and two methods), formant, bitcrush, voice tone, a vocoder "synth voice", robot (ring modulation), distortion, flanger, chorus, vibrato, tremolo, echo, reverb, high cut, a three-band equalizer, compressor, volume, phase invert and a limiter. Moving a slider switches its effect on; each slider and each effect has a reset button, and so does the whole panel. Effects fade in and out when switched so nothing clicks.
 - **Presets**: Fizmo's voice presets (helium, deep, robot, alien, monster, radio, telephone, megaphone, cave, underwater, whisper, feminine, masculine) and a few of Rustle's own (Chipmunk, Demon, Walkie-talkie, Stadium, Ghost, Broadcast, Space robot) load straight into the panel, so you can tweak them. Save your own, rename and delete them; they're Fizmo preset files in Rustle's `presets` folder.
 - **Output**: an Automatic mode that uses your default microphone and speakers, makes Rustle Mic, and puts things back together when a device or the sound server comes back. Or choose the microphone and speakers yourself. Separate volumes for what others hear and what you hear, a voice volume, mic on/off, push to talk, "hear myself", and live level meters for the microphone, your changed voice, what goes to others and what comes out of your speakers.
 - **Files**: Rustle's own file browser (no system dialog): your home folder and the usual places, mounted drives and USB sticks, a path bar you can type into, and hidden files when you want them. Add the folder you're in to the library, or tick sound files and copy them into a library folder.
-- **Keys**: a key for every sound, plus Stop all (F8), Mic on/off (F9) and push to talk. They work while Rustle has focus, and with global hotkeys on they also work while you're in a game (see below).
-- **Command line**: `rustle ctl stop-all`, `rustle ctl play "air horn"`, `rustle ctl ptt-down` and friends drive the running Rustle, which is handy for stream decks and desktop shortcuts.
+- **Keys**: a key for every sound, plus Stop all (F8), Mic on/off (F9), push to talk, and music play/pause, next song and previous song. They work while Rustle has focus, and with global hotkeys on they also work while you're in a game (see below).
+- **Command line**: `rustle ctl stop-all`, `rustle ctl play "air horn"`, `rustle ctl ptt-down`, `rustle ctl music-next` and friends drive the running Rustle, which is handy for stream decks and desktop shortcuts.
 
 ## Using Rustle Mic
 
@@ -51,14 +53,17 @@ rustle render IN OUT.wav       apply sound edits (--speed, --tempo, --pitch, --r
 rustle voice IN OUT.wav        run a recording through the voice changer (--preset NAME, --set pitch.semitones=5)
 rustle devices                 list the sound devices Rustle sees
 rustle ctl COMMAND             tell the running Rustle to: stop-all, toggle-mic, mic-on, mic-off, ptt-down, ptt-up,
-                               play NAME, toggle NAME, stop NAME, preset NAME, voice-off, status
+                               play NAME, toggle NAME, stop NAME, preset NAME, voice-off, status,
+                               music-play, music-pause, music-toggle, music-next, music-prev, music-stop,
+                               music-shuffle [on|off], music-repeat [off|all|one], music-add PATH,
+                               music-playlist NAME, music-shuffle-playlist NAME, music-queue-playlist NAME, music-status
 ```
 
 `rustle ctl` talks to the window over a socket in `$XDG_RUNTIME_DIR` (Linux and macOS).
 
 ## Settings
 
-Everything is kept in `$XDG_CONFIG_HOME/rustle` (usually `~/.config/rustle`; `%APPDATA%\Rustle` on Windows and `~/Library/Application Support/Rustle` on macOS): `settings.json` holds your folders, favorites, sound edits, keys, devices, volumes and the voice panel, and `presets/` holds your saved voice presets. Settings are written to a temporary file and renamed into place. If `settings.json` can't be read, Rustle moves it aside as `settings.json.broken-<time>`, starts with defaults and tells you.
+Everything is kept in `$XDG_CONFIG_HOME/rustle` (usually `~/.config/rustle`; `%APPDATA%\Rustle` on Windows and `~/Library/Application Support/Rustle` on macOS): `settings.json` holds your folders, favorites, sound edits, keys, devices, volumes and the voice panel, `presets/` holds your saved voice presets, `playlists.json` your playlists, and `music.json` the music queue and where you were in the song that was playing (Rustle opens with it paused there). Settings are written to a temporary file and renamed into place. If `settings.json` can't be read, Rustle moves it aside as `settings.json.broken-<time>`, starts with defaults and tells you.
 
 | Variable | |
 |---|---|
@@ -77,7 +82,7 @@ build/bin/rustle
 
 CMake fetches Fizmo, Grove and Walnut at the tags in `CMakeLists.txt`. On Debian and Ubuntu you'll need `libx11-dev libxft-dev libxrender-dev libfontconfig1-dev libfreetype-dev libssl-dev libpango1.0-dev libcairo2-dev zlib1g-dev libjpeg-dev libvulkan-dev libgl-dev`; on Fedora `libX11-devel libXft-devel libXrender-devel fontconfig-devel freetype-devel openssl-devel pango-devel cairo-devel zlib-devel libjpeg-turbo-devel vulkan-headers mesa-libGL-devel libstdc++-static`. Rustle needs no PulseAudio, PipeWire or X11 development packages: it loads `libpulse` and `libX11` at run time. `-DRUSTLE_BUILD_APP=OFF` builds just the `rustle_core` library and the tests; `ctest` runs them (with the null audio backend).
 
-The code is in `Include/rustle` and `Source/rustle`: `library` (scanning and browsing folders), `files` (the file browser), `clip` (rendering sound edits), `voice` (the effect panel and presets), `engine` (audio streams, mixing and routing), `virtual_mic` (the PulseAudio modules), `hotkeys`, `control` (`rustle ctl`), `settings` and `session`, which ties them together. `Tools/rustle.cpp` is the program: it hands the session to the Grove UI in `UI/` and holds the command line.
+The code is in `Include/rustle` and `Source/rustle`: `library` (scanning and browsing folders), `files` (the file browser), `clip` (rendering sound edits), `voice` (the effect panel and presets), `engine` (audio streams, mixing and routing), `virtual_mic` (the PulseAudio modules), `hotkeys`, `control` (`rustle ctl`), `music` (the queue, shuffle and playlists), `settings` and `session`, which ties them together. `Tools/rustle.cpp` is the program: it hands the session to the Grove UI in `UI/` and holds the command line.
 
 ## Releases
 

@@ -1036,3 +1036,234 @@ modal {
 #key-modal {
     width: 440px;
 }
+
+.player {
+    padding: 14px 18px;
+    gap: 22px;
+    align-items: center;
+    background: var(--panel);
+    border-color: var(--line);
+    border-width: 0 0 1px 0;
+    flex-wrap: wrap;
+    row-gap: 12px;
+}
+
+.np {
+    min-width: 280px;
+    gap: 4px;
+}
+
+.np-title {
+    font-size: 17px;
+    font-weight: bold;
+    white-space: nowrap;
+    overflow: hidden;
+}
+
+.seek-row {
+    gap: 10px;
+    align-items: center;
+    margin: 6px 0 0 0;
+}
+
+.seek {
+    flex: 1;
+    min-width: 160px;
+}
+
+.clock {
+    width: 52px;
+    color: var(--muted);
+    font-family: monospace;
+    font-size: 12px;
+}
+
+.transport {
+    gap: 8px;
+    align-items: center;
+}
+
+.round {
+    min-width: 44px;
+    padding: 8px 12px;
+    border-radius: 999px;
+    font-size: 13px;
+}
+
+.play-button {
+    min-width: 58px;
+    padding: 12px 16px;
+    font-size: 17px;
+}
+
+.mode-button {
+    min-width: 96px;
+    color: var(--muted);
+}
+
+.mode-button.on {
+    background: var(--accent-dim);
+    border-color: var(--accent);
+    color: var(--accent);
+}
+
+.music-levels {
+    gap: 6px;
+}
+
+.label.short {
+    width: 56px;
+}
+
+.music-switches {
+    gap: 16px;
+    align-items: center;
+}
+
+.music-layout {
+    flex: 1;
+    gap: 0;
+}
+
+.pl-side {
+    width: 230px;
+    padding: 14px 10px;
+    gap: 6px;
+    background: var(--panel);
+    border-color: var(--line);
+    border-width: 0 1px 0 0;
+    overflow: auto;
+}
+
+.side-head {
+    align-items: center;
+    padding: 0 0 4px 0;
+}
+
+.music-main {
+    flex: 1;
+    gap: 0;
+}
+
+.bar-actions {
+    gap: 8px;
+    align-items: center;
+    flex-wrap: wrap;
+    row-gap: 6px;
+}
+
+.music-list {
+    padding: 6px 12px;
+    gap: 0;
+}
+
+.mq-row {
+    width: 100%;
+    align-items: center;
+    gap: 8px;
+    padding: 5px 8px;
+    border-color: var(--line);
+    border-width: 0 0 1px 0;
+    cursor: pointer;
+    user-select: none;
+
+    &:hover {
+        background: var(--card);
+    }
+}
+
+.mq-row.played .mq-name {
+    color: var(--muted);
+}
+
+.mq-row.current {
+    background: #1f2e24;
+}
+
+.mq-row.current .mq-name {
+    color: var(--accent);
+    font-weight: bold;
+}
+
+.mq-row.holds .mq-name {
+    color: var(--accent);
+}
+
+.mq-row.missing .mq-name {
+    color: var(--bad);
+}
+
+.mq-toggle {
+    width: 18px;
+    color: var(--muted);
+}
+
+.mq-icon {
+    width: 20px;
+    color: var(--amber);
+}
+
+.mq-icon.song {
+    color: var(--teal);
+}
+
+.mq-name {
+    flex: 1;
+    white-space: nowrap;
+    overflow: hidden;
+}
+
+.mq-detail {
+    color: var(--muted);
+    font-size: 12px;
+    white-space: nowrap;
+    max-width: 280px;
+    overflow: hidden;
+}
+
+.mq-more {
+    color: var(--muted);
+    padding: 8px;
+}
+
+.pl-entry {
+    align-items: center;
+    gap: 6px;
+}
+
+.pl-count {
+    color: var(--muted);
+    font-size: 11px;
+    padding: 0 0 0 10px;
+}
+
+.picker-body {
+    gap: 10px;
+    height: 400px;
+}
+
+.picker-places {
+    width: 170px;
+    overflow: auto;
+}
+
+.picker-main {
+    flex: 1;
+    gap: 0;
+    border-color: var(--line);
+    border-width: 1px;
+    border-radius: 8px;
+}
+
+.picker-list {
+    padding: 4px 8px;
+}
+
+#music-picker {
+    width: 800px;
+}
+
+.pl-entry-box {
+    gap: 0;
+    margin: 0 0 4px 0;
+}

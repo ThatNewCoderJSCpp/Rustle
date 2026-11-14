@@ -191,6 +191,15 @@ std::string Settings::to_json() const {
     root.set("show_hidden", json_bool(show_hidden));
     root.set("rescan_seconds", json_number(rescan_seconds));
     root.set("voice_preset", json_string(voice_preset));
+    root.set("music_volume", json_number(music_volume));
+    root.set("music_to_others", json_bool(music_to_others));
+    root.set("music_to_me", json_bool(music_to_me));
+    root.set("music_shuffle", json_bool(music_shuffle));
+    root.set("music_repeat", json_string(music_repeat));
+    root.set("music_browser_path", json_string(music_browser_path));
+    root.set("key_music_toggle", json_string(key_music_toggle));
+    root.set("key_music_next", json_string(key_music_next));
+    root.set("key_music_previous", json_string(key_music_previous));
     if (!voice_json.empty()) {
         Json voice;
         if (fizmo::audio::parse_json(voice_json, voice) && voice.is_object()) root.set("voice", std::move(voice));
@@ -265,6 +274,16 @@ bool Settings::from_json(const std::string& text, std::string* error) {
     s.show_hidden = json_get_bool(root, "show_hidden", s.show_hidden);
     s.rescan_seconds = clampd(json_get_number(root, "rescan_seconds", s.rescan_seconds), 0.0, 3600.0, 3.0);
     s.voice_preset = json_get_string(root, "voice_preset", s.voice_preset);
+    s.music_volume = clampf(static_cast<float>(json_get_number(root, "music_volume", s.music_volume)), 0.0f, 2.0f, 0.7f);
+    s.music_to_others = json_get_bool(root, "music_to_others", s.music_to_others);
+    s.music_to_me = json_get_bool(root, "music_to_me", s.music_to_me);
+    s.music_shuffle = json_get_bool(root, "music_shuffle", s.music_shuffle);
+    s.music_repeat = json_get_string(root, "music_repeat", s.music_repeat);
+    if (s.music_repeat != "off" && s.music_repeat != "all" && s.music_repeat != "one") s.music_repeat = "off";
+    s.music_browser_path = json_get_string(root, "music_browser_path", s.music_browser_path);
+    s.key_music_toggle = json_get_string(root, "key_music_toggle", s.key_music_toggle);
+    s.key_music_next = json_get_string(root, "key_music_next", s.key_music_next);
+    s.key_music_previous = json_get_string(root, "key_music_previous", s.key_music_previous);
     if (const Json* voice = root.find("voice")) {
         if (voice->is_object()) s.voice_json = fizmo::audio::write_json(*voice, true);
     }

@@ -20,6 +20,16 @@ string: fb_selected = "";
 bool: filling = false;
 string: route_vmic = "";
 bool: edit_open = false;
+string: music_view = "queue";
+string: music_root = "";
+string: music_open = "|";
+string: music_rev = "";
+bool: music_seeking = false;
+bool: music_levels_loaded = false;
+string: mp_path = "";
+string: mp_parent = "";
+string: mp_selected = "";
+string: mp_target = "queue";
 
 function call(const string&: name, const string&: arg) -> string;
 function el(const string&: tag, const string&: cls, const string&: label) -> grove::Element;
@@ -78,6 +88,21 @@ function key_label(const string&: chord) -> string;
 function apply_captured(const string&: chord) -> void;
 function update_vmic_pill() -> void;
 function search_changed(const string&: typed) -> void;
+function update_music() -> void;
+function load_music_levels() -> void;
+function build_music_list() -> void;
+function queue_row(const string&: line) -> grove::Element;
+function playlist_row(const string&: line) -> grove::Element;
+function music_button(const string&: label, const string&: tip) -> grove::Element;
+function music_result(const string&: r) -> void;
+function fill_playlists() -> void;
+function open_music_view(const string&: view) -> void;
+function toggle_open(const string&: id) -> void;
+function open_picker(const string&: target, const string&: label) -> void;
+function picker_dir(const string&: path) -> void;
+function picker_pick(const string&: path, bool: on) -> void;
+function picker_count() -> long int;
+function picker_add(const string&: paths) -> void;
 
 function call(const string&: name, const string&: arg) -> string {
     return grove::call("rustle." + name, arg);
@@ -1271,6 +1296,9 @@ function load_settings_page() -> void {
     grove::get_by_id("key-stop").set_inner_text(key_label(setting(s, "key_stop_all")));
     grove::get_by_id("key-mic").set_inner_text(key_label(setting(s, "key_mic_toggle")));
     grove::get_by_id("key-ptt").set_inner_text(key_label(setting(s, "key_push_to_talk")));
+    grove::get_by_id("key-mtoggle").set_inner_text(key_label(setting(s, "key_music_toggle")));
+    grove::get_by_id("key-mnext").set_inner_text(key_label(setting(s, "key_music_next")));
+    grove::get_by_id("key-mprev").set_inner_text(key_label(setting(s, "key_music_previous")));
     string: socket = setting(s, "control_socket");
     if (socket.empty()) then {
         set_text("ctl-hint", "These commands need a Unix socket, so they work on Linux and macOS. On Windows use global hotkeys instead.");
@@ -1396,6 +1424,12 @@ function apply_captured(const string&: chord) -> void {
         r = call("set", tab2("key_mic_toggle", chord));
     } else if (key_target == "ptt") then {
         r = call("set", tab2("key_push_to_talk", chord));
+    } else if (key_target == "mtoggle") then {
+        r = call("set", tab2("key_music_toggle", chord));
+    } else if (key_target == "mnext") then {
+        r = call("set", tab2("key_music_next", chord));
+    } else if (key_target == "mprev") then {
+        r = call("set", tab2("key_music_previous", chord));
     } else if (key_target == "sound") then {
         r = call("keybind_set", tab2(edit_path, chord));
     }
@@ -2017,6 +2051,801 @@ grove::get_by_id("key-modal").on("close", [](grove::Event&: e) -> void {
     key_target = "";
 });
 
+function music_button(const string&: label, const string&: tip) -> grove::Element {
+    grove::Element: b = el("button", "tile-button", label);
+    if (!tip.empty()) then {
+        b.set_attribute("title", tip);
+    }
+    return b;
+} end function music_button
+
+function music_result(const string&: r) -> void {
+    if (failed(r)) then {
+        toast("info", reason(r));
+    }
+    update_music();
+} end function music_result
+
+function load_music_levels() -> void {
+    string: s = call("settings", "");
+    filling = true;
+    grove::get_by_id("mu-volume").set_value_float(to_float(setting(s, "music_volume")));
+    grove::get_by_id("mu-to-others").set_value_bool(setting(s, "music_to_others") == "1");
+    grove::get_by_id("mu-to-me").set_value_bool(setting(s, "music_to_me") == "1");
+    filling = false;
+    if (mp_path.empty()) then {
+        mp_path = setting(s, "music_browser_path");
+    }
+    music_levels_loaded = true;
+} end function load_music_levels
+
+function update_music() -> void {
+    auto: f = call("music_now", "").split("\t");
+    if (f.size() < 16l) then {
+        return;
+    }
+    string: state = f[0];
+    if (f[2].empty()) then {
+        set_text("mu-title", "Nothing playing");
+        set_text("mu-sub", "Add songs or folders to the queue, or play a playlist");
+    } else then {
+        set_text("mu-title", f[2]);
+        string: sub = f[3];
+        if (state == "paused") then {
+            sub = "Paused  \u{2022}  " + sub;
+        } else if (state == "loading") then {
+            sub = "Loading\u{2026}  \u{2022}  " + sub;
+        } else if (state == "stopped") then {
+            sub = "Stopped  \u{2022}  " + sub;
+        }
+        set_text("mu-sub", sub);
+    }
+    set_text("mu-pos", f[4]);
+    set_text("mu-len", f[5]);
+    if (!music_seeking) then {
+        filling = true;
+        grove::Element: seek_bar = grove::get_by_id("mu-seek");
+        string: top = f[7];
+        if (to_float(top) <= 0.0) then {
+            top = "1";
+        }
+        seek_bar.set_attribute("max", top);
+        seek_bar.set_value_float(to_float(f[6]));
+        filling = false;
+    }
+    grove::Element: play_button = grove::get_by_id("mu-play");
+    if (state == "playing" || state == "loading") then {
+        play_button.set_inner_text("\u{25AE}\u{25AE}");
+    } else then {
+        play_button.set_inner_text("\u{25B6}");
+    }
+    grove::Element: shuffle_button = grove::get_by_id("mu-shuffle");
+    if (f[8] == "1") then {
+        shuffle_button.add_class("on");
+    } else then {
+        shuffle_button.remove_class("on");
+    }
+    grove::Element: repeat_button = grove::get_by_id("mu-repeat");
+    repeat_button.set_inner_text("Repeat " + f[9]);
+    if (f[9] == "off") then {
+        repeat_button.remove_class("on");
+    } else then {
+        repeat_button.add_class("on");
+    }
+    if (music_view == "queue") then {
+        if (f[11] == "0") then {
+            set_text("mv-count", "");
+        } else then {
+            set_text("mv-count", f[10] + " of " + f[11] + " songs played");
+        }
+    }
+    if (f[12] != music_rev) then {
+        music_rev = f[12];
+        build_music_list();
+    }
+} end function update_music
+
+function toggle_open(const string&: id) -> void {
+    string: key = "|" + id + "|";
+    if (music_open.contains(key)) then {
+        music_open = music_open.replace(key, "|");
+    } else then {
+        music_open = music_open + id + "|";
+    }
+    build_music_list();
+} end function toggle_open
+
+function queue_row(const string&: line) -> grove::Element {
+    auto: f = line.split("\t");
+    string: id = f[1];
+    string: kind = f[3];
+    bool: container = kind != "song";
+    grove::Element: r = el("row", "mq-row", "");
+    r.set_attribute("id", "mq-" + id);
+    r.set_style("padding-left", f[2] + "px");
+    if (f[6] == "1") then {
+        r.add_class("played");
+    }
+    if (f[7] == "1") then {
+        if (container) then {
+            r.add_class("holds");
+        } else then {
+            r.add_class("current");
+        }
+    }
+    string: arrow = "";
+    if (container) then {
+        if (f[8] == "1") then {
+            arrow = "\u{25BE}";
+        } else then {
+            arrow = "\u{25B8}";
+        }
+    }
+    r.append_child(el("text", "mq-toggle", arrow));
+    if (kind == "song") then {
+        r.append_child(el("text", "mq-icon song", "\u{266A}"));
+    } else if (kind == "folder") then {
+        r.append_child(el("text", "mq-icon", "\u{25A4}"));
+    } else then {
+        r.append_child(el("text", "mq-icon", "\u{266B}"));
+    }
+    r.append_child(el("div", "mq-name", f[4]));
+    r.append_child(el("text", "mq-detail", f[5]));
+    if (container) then {
+        grove::Element: play_here = music_button("\u{25B6}", "Play from here");
+        play_here.on("click", [id](grove::Event&: e) -> void {
+            e.stop_propagation();
+            music_result(call("music_jump", id));
+        });
+        r.append_child(play_here);
+    }
+    if (f[10] != "1") then {
+        grove::Element: up_button = music_button("\u{2191}", "Move up");
+        up_button.on("click", [id](grove::Event&: e) -> void {
+            e.stop_propagation();
+            call("music_move", tab2(id, "-1"));
+            update_music();
+        });
+        r.append_child(up_button);
+    }
+    if (f[11] != "1") then {
+        grove::Element: down_button = music_button("\u{2193}", "Move down");
+        down_button.on("click", [id](grove::Event&: e) -> void {
+            e.stop_propagation();
+            call("music_move", tab2(id, "1"));
+            update_music();
+        });
+        r.append_child(down_button);
+    }
+    grove::Element: rm = music_button("\u{00D7}", "Take out of the queue");
+    rm.on("click", [id](grove::Event&: e) -> void {
+        e.stop_propagation();
+        call("music_remove", id);
+        update_music();
+    });
+    r.append_child(rm);
+    if (container) then {
+        r.on("click", [id](grove::Event&: e) -> void {
+            toggle_open(id);
+        });
+    } else then {
+        r.on("click", [id](grove::Event&: e) -> void {
+            music_result(call("music_jump", id));
+        });
+    }
+    return r;
+} end function queue_row
+
+function playlist_row(const string&: line) -> grove::Element {
+    auto: f = line.split("\t");
+    string: id = f[1];
+    string: kind = f[2];
+    grove::Element: r = el("row", "mq-row", "");
+    if (f[5] == "1") then {
+        r.add_class("missing");
+    }
+    r.append_child(el("text", "mq-toggle", ""));
+    if (kind == "song") then {
+        r.append_child(el("text", "mq-icon song", "\u{266A}"));
+    } else if (kind == "folder") then {
+        r.append_child(el("text", "mq-icon", "\u{25A4}"));
+    } else then {
+        r.append_child(el("text", "mq-icon", "\u{25B8}"));
+    }
+    string: name = f[3];
+    if (f[5] == "1") then {
+        name = name + "  (missing)";
+    }
+    r.append_child(el("div", "mq-name", name));
+    r.append_child(el("text", "mq-detail", f[4]));
+    grove::Element: play_here = music_button("\u{25B6}", "Play just this now");
+    play_here.on("click", [id](grove::Event&: e) -> void {
+        e.stop_propagation();
+        music_result(call("pl_play", tab2(id, "play")));
+    });
+    r.append_child(play_here);
+    grove::Element: add_button = music_button("+", "Add to the queue");
+    add_button.on("click", [id](grove::Event&: e) -> void {
+        e.stop_propagation();
+        string: res = call("pl_play", tab2(id, "queue"));
+        if (failed(res)) then {
+            toast("error", reason(res));
+        } else then {
+            toast("info", "Added to the queue.");
+        }
+        update_music();
+    });
+    r.append_child(add_button);
+    if (f[6] != "1") then {
+        grove::Element: up_button = music_button("\u{2191}", "Move up");
+        up_button.on("click", [id](grove::Event&: e) -> void {
+            e.stop_propagation();
+            call("pl_move", tab2(id, "-1"));
+            build_music_list();
+        });
+        r.append_child(up_button);
+    }
+    if (f[7] != "1") then {
+        grove::Element: down_button = music_button("\u{2193}", "Move down");
+        down_button.on("click", [id](grove::Event&: e) -> void {
+            e.stop_propagation();
+            call("pl_move", tab2(id, "1"));
+            build_music_list();
+        });
+        r.append_child(down_button);
+    }
+    grove::Element: rm = music_button("\u{00D7}", "Take out of the playlist");
+    string: label = f[3];
+    rm.on("click", [id, label](grove::Event&: e) -> void {
+        e.stop_propagation();
+        grove::confirm("Remove", "Take " + label + " out of this playlist? Files stay where they are.", [id](bool: yes) -> void {
+            if (yes) then {
+                call("pl_delete", id);
+                build_music_list();
+                fill_playlists();
+            }
+        });
+    });
+    r.append_child(rm);
+    if (kind == "group") then {
+        r.on("click", [id](grove::Event&: e) -> void {
+            open_music_view(id);
+        });
+    } else then {
+        r.on("click", [id](grove::Event&: e) -> void {
+            music_result(call("pl_play", tab2(id, "play")));
+        });
+    }
+    return r;
+} end function playlist_row
+
+function build_music_list() -> void {
+    grove::Element: list = grove::get_by_id("music-list");
+    grove::Element: crumbs = grove::get_by_id("mv-crumbs");
+    clear(list);
+    clear(crumbs);
+    long int: n = 0l;
+    if (music_view == "queue") then {
+        show("queue-actions", true);
+        show("pl-actions", false);
+        crumbs.append_child(el("text", "crumb last", "Queue"));
+        auto: rows = call("music_queue", music_open).split("\n");
+        for (long int: i = 0l; i < rows.size(); i += 1l) {
+            auto: f = rows[i].split("\t");
+            if (f[0] == "item" && f.size() >= 12l) then {
+                list.append_child(queue_row(rows[i]));
+                n += 1l;
+            } else if (f[0] == "more" && f.size() >= 3l) then {
+                grove::Element: more_row = el("div", "mq-more", "\u{2026} and " + f[2] + " more (close a folder to see them)");
+                more_row.set_style("padding-left", f[1] + "px");
+                list.append_child(more_row);
+            }
+        }
+        show("music-empty", n == 0l);
+        set_text("music-empty", "The queue is empty. Press \u{201C}Add music\u{2026}\u{201D} to add songs or whole folders, or play one of your playlists.");
+        return;
+    }
+    string: r = call("pl_view", music_view);
+    if (failed(r)) then {
+        music_view = "queue";
+        music_root = "";
+        fill_playlists();
+        build_music_list();
+        return;
+    }
+    show("queue-actions", false);
+    show("pl-actions", true);
+    auto: rows = r.split("\n");
+    crumbs.append_child(el("text", "crumb", "Playlists"));
+    for (long int: i = 0l; i < rows.size(); i += 1l) {
+        auto: f = rows[i].split("\t");
+        if (f.size() < 3l) then {
+            continue;
+        }
+        if (f[0] == "head" && f.size() >= 6l) then {
+            set_text("mv-count", f[5]);
+            if (f[3] == "1") then {
+                grove::get_by_id("pl-delete").set_inner_text("Delete playlist");
+            } else then {
+                grove::get_by_id("pl-delete").set_inner_text("Delete folder");
+            }
+        } else if (f[0] == "crumb") then {
+            bool: last = i + 1l >= rows.size() || !rows[i + 1l].starts_with("crumb");
+            if (crumbs.child_count() == 1l) then {
+                music_root = f[1];
+            }
+            crumbs.append_child(el("text", "crumb-sep", "/"));
+            string: target = f[1];
+            string: cls = "crumb";
+            if (last) then {
+                cls = "crumb last";
+            }
+            grove::Element: b = el("button", cls, f[2]);
+            b.on("click", [target](grove::Event&: e) -> void {
+                open_music_view(target);
+            });
+            crumbs.append_child(b);
+        } else if (f[0] == "item" && f.size() >= 8l) then {
+            list.append_child(playlist_row(rows[i]));
+            n += 1l;
+        }
+    }
+    show("music-empty", n == 0l);
+    set_text("music-empty", "This is empty. Press \u{201C}Add music\u{2026}\u{201D} to put songs or folders in it, or \u{201C}New folder\u{2026}\u{201D} to group them.");
+} end function build_music_list
+
+function fill_playlists() -> void {
+    grove::Element: box = grove::get_by_id("pl-list");
+    clear(box);
+    grove::Element: q = grove::get_by_id("mv-queue");
+    if (music_view == "queue") then {
+        q.add_class("current");
+    } else then {
+        q.remove_class("current");
+    }
+    auto: rows = call("pl_list", "").split("\n");
+    long int: n = 0l;
+    for (long int: i = 0l; i < rows.size(); i += 1l) {
+        auto: f = rows[i].split("\t");
+        if (f.size() < 3l) then {
+            continue;
+        }
+        string: id = f[0];
+        grove::Element: entry = el("column", "pl-entry-box", "");
+        grove::Element: b = el("button", "place", f[1]);
+        if (music_view != "queue" && id == music_root) then {
+            b.add_class("current");
+        }
+        b.on("click", [id](grove::Event&: e) -> void {
+            open_music_view(id);
+        });
+        entry.append_child(b);
+        entry.append_child(el("text", "pl-count", f[2]));
+        box.append_child(entry);
+        n += 1l;
+    }
+    if (n == 0l) then {
+        box.append_child(el("p", "hint", "No playlists yet. Press New\u{2026} to make one."));
+    }
+} end function fill_playlists
+
+function open_music_view(const string&: view) -> void {
+    music_view = view;
+    if (view == "queue") then {
+        music_root = "";
+        set_text("mv-count", "");
+    } else if (music_root.empty()) then {
+        music_root = view;
+    }
+    build_music_list();
+    fill_playlists();
+    update_music();
+} end function open_music_view
+
+function picker_count() -> long int {
+    long int: n = 0l;
+    auto: parts = mp_selected.split("\t");
+    for (long int: i = 0l; i < parts.size(); i += 1l) {
+        if (!parts[i].empty()) then {
+            n += 1l;
+        }
+    }
+    return n;
+} end function picker_count
+
+function picker_pick(const string&: path, bool: on) -> void {
+    auto: parts = mp_selected.split("\t");
+    string: out = "";
+    for (long int: i = 0l; i < parts.size(); i += 1l) {
+        if (parts[i].empty() || parts[i] == path) then {
+            continue;
+        }
+        out = out + parts[i] + "\t";
+    }
+    if (on && !path.empty()) then {
+        out = out + path + "\t";
+    }
+    mp_selected = out;
+    long int: n = picker_count();
+    if (n == 0l) then {
+        grove::get_by_id("mp-add-picked").set_inner_text("Add ticked");
+    } else then {
+        grove::get_by_id("mp-add-picked").set_inner_text("Add " + n.to_string() + " ticked");
+    }
+} end function picker_pick
+
+function picker_dir(const string&: path) -> void {
+    string: r = call("list_dir", tab2(path, "0"));
+    if (failed(r)) then {
+        set_text("mp-status", reason(r));
+        return;
+    }
+    auto: rows = r.split("\n");
+    grove::Element: list = grove::get_by_id("mp-list");
+    clear(list);
+    long int: dirs = 0l;
+    long int: songs = 0l;
+    for (long int: i = 0l; i < rows.size(); i += 1l) {
+        auto: f = rows[i].split("\t");
+        if (f.size() < 2l) then {
+            continue;
+        }
+        if (f[0] == "ok" && f.size() >= 3l) then {
+            mp_path = f[1];
+            mp_parent = f[2];
+            filling = true;
+            grove::get_by_id("mp-path").set_value_string(mp_path);
+            filling = false;
+            call("set", tab2("music_browser_path", mp_path));
+        } else if (f[0] == "item" && f.size() >= 7l) then {
+            string: item_path = f[2];
+            bool: is_dir = f[3] == "1";
+            bool: is_sound = f[4] == "1";
+            if (!is_dir && !is_sound) then {
+                continue;
+            }
+            grove::Element: line = el("row", "file-row", "");
+            grove::Element: pick = grove::create_element("input_bool");
+            pick.set_attribute("class", "pick");
+            pick.set_value_bool(mp_selected.contains(item_path + "\t"));
+            pick.on("change", [item_path](grove::Event&: e) -> void {
+                picker_pick(item_path, e.target().value_bool());
+            });
+            line.append_child(pick);
+            if (is_dir) then {
+                line.add_class("is-dir");
+                grove::Element: icon = el("text", "file-icon dir", "\u{25B8}");
+                grove::Element: name = el("div", "file-name", f[1]);
+                icon.on("click", [item_path](grove::Event&: e) -> void {
+                    picker_dir(item_path);
+                });
+                name.on("click", [item_path](grove::Event&: e) -> void {
+                    picker_dir(item_path);
+                });
+                line.append_child(icon);
+                line.append_child(name);
+                dirs += 1l;
+            } else then {
+                line.append_child(el("text", "file-icon sound", "\u{266A}"));
+                line.append_child(el("div", "file-name", f[1]));
+                line.append_child(el("text", "file-size", f[5]));
+                songs += 1l;
+            }
+            list.append_child(line);
+        }
+    }
+    string: status = dirs.to_string() + " folders, " + songs.to_string() + " songs here";
+    if (dirs == 1l) then {
+        status = "1 folder, " + songs.to_string() + " songs here";
+    }
+    set_text("mp-status", status);
+    grove::Element: places = grove::get_by_id("mp-places");
+    clear(places);
+    auto: pr = call("places", "").split("\n");
+    for (long int: i = 0l; i < pr.size(); i += 1l) {
+        auto: pf = pr[i].split("\t");
+        if (pf.size() < 2l) then {
+            continue;
+        }
+        string: at = pf[1];
+        grove::Element: b = el("button", "place", pf[0]);
+        if (at == mp_path) then {
+            b.add_class("current");
+        }
+        b.on("click", [at](grove::Event&: e) -> void {
+            picker_dir(at);
+        });
+        places.append_child(b);
+    }
+} end function picker_dir
+
+function open_picker(const string&: target, const string&: label) -> void {
+    if (!music_levels_loaded) then {
+        load_music_levels();
+    }
+    mp_target = target;
+    mp_selected = "";
+    picker_pick("", false);
+    set_text("mp-target", label);
+    picker_dir(mp_path);
+    grove::get_by_id("music-picker").open_modal();
+} end function open_picker
+
+function picker_add(const string&: paths) -> void {
+    string: r = "";
+    if (mp_target == "queue") then {
+        r = call("music_add", paths);
+    } else then {
+        r = call("pl_add", mp_target + "\t" + paths);
+    }
+    if (failed(r)) then {
+        set_text("mp-status", "Couldn't add that: " + reason(r));
+        return;
+    }
+    auto: f = r.split("\t");
+    string: msg = "Added " + f[1];
+    if (f[1] == "1") then {
+        msg = msg + " item.";
+    } else then {
+        msg = msg + " items.";
+    }
+    if (f.size() > 2l && !f[2].empty()) then {
+        msg = msg + " Skipped: " + f[2];
+    }
+    set_text("mp-status", msg);
+    mp_selected = "";
+    picker_pick("", false);
+    picker_dir(mp_path);
+    fill_playlists();
+    build_music_list();
+    update_music();
+} end function picker_add
+
+grove::get_by_id("music").on("page_show", [](grove::Event&: e) -> void {
+    load_music_levels();
+    fill_playlists();
+    build_music_list();
+    update_music();
+});
+
+grove::get_by_id("mu-play").on("click", [](grove::Event&: e) -> void {
+    music_result(call("music_toggle", ""));
+});
+
+grove::get_by_id("mu-next").on("click", [](grove::Event&: e) -> void {
+    music_result(call("music_next", ""));
+});
+
+grove::get_by_id("mu-prev").on("click", [](grove::Event&: e) -> void {
+    music_result(call("music_prev", ""));
+});
+
+grove::get_by_id("mu-shuffle").on("click", [](grove::Event&: e) -> void {
+    bool: on = grove::get_by_id("mu-shuffle").has_class("on");
+    call("music_shuffle", flag(!on));
+    update_music();
+});
+
+grove::get_by_id("mu-repeat").on("click", [](grove::Event&: e) -> void {
+    string: shown = grove::get_by_id("mu-repeat").inner_text();
+    string: mode = "all";
+    if (shown == "Repeat all") then {
+        mode = "one";
+    } else if (shown == "Repeat one") then {
+        mode = "off";
+    }
+    call("music_repeat", mode);
+    update_music();
+});
+
+grove::get_by_id("mu-seek").on("input", [](grove::Event&: e) -> void {
+    if (filling) then {
+        return;
+    }
+    music_seeking = true;
+});
+
+grove::get_by_id("mu-seek").on("change", [](grove::Event&: e) -> void {
+    if (filling) then {
+        return;
+    }
+    call("music_seek", e.target().value_float().to_string());
+    music_seeking = false;
+    update_music();
+});
+
+grove::get_by_id("mu-volume").on("input", [](grove::Event&: e) -> void {
+    if (filling) then {
+        return;
+    }
+    call("set", tab2("music_volume", e.target().value_float().to_string()));
+});
+
+grove::get_by_id("mu-to-others").on("change", [](grove::Event&: e) -> void {
+    if (filling) then {
+        return;
+    }
+    call("set", tab2("music_to_others", flag(e.target().value_bool())));
+});
+
+grove::get_by_id("mu-to-me").on("change", [](grove::Event&: e) -> void {
+    if (filling) then {
+        return;
+    }
+    call("set", tab2("music_to_me", flag(e.target().value_bool())));
+});
+
+grove::get_by_id("mv-queue").on("click", [](grove::Event&: e) -> void {
+    open_music_view("queue");
+});
+
+grove::get_by_id("mq-add").on("click", [](grove::Event&: e) -> void {
+    open_picker("queue", "Adding to the queue");
+});
+
+grove::get_by_id("mq-clear-played").on("click", [](grove::Event&: e) -> void {
+    call("music_clear_played", "");
+    update_music();
+});
+
+grove::get_by_id("mq-clear").on("click", [](grove::Event&: e) -> void {
+    grove::confirm("Clear queue", "Stop the music and empty the queue? Your playlists stay as they are.", [](bool: yes) -> void {
+        if (yes) then {
+            call("music_clear", "");
+            music_open = "|";
+            update_music();
+        }
+    });
+});
+
+grove::get_by_id("pl-new").on("click", [](grove::Event&: e) -> void {
+    grove::prompt_string("New playlist", "Name for the new playlist:", "", [](string: name) -> void {
+        string: r = call("pl_create", name.trim());
+        if (failed(r)) then {
+            toast("error", reason(r));
+            return;
+        }
+        music_root = reason(r);
+        open_music_view(reason(r));
+    });
+});
+
+grove::get_by_id("pl-play").on("click", [](grove::Event&: e) -> void {
+    music_result(call("pl_play", tab2(music_view, "play")));
+});
+
+grove::get_by_id("pl-shuffle").on("click", [](grove::Event&: e) -> void {
+    music_result(call("pl_play", tab2(music_view, "shuffle")));
+});
+
+grove::get_by_id("pl-queue").on("click", [](grove::Event&: e) -> void {
+    string: r = call("pl_play", tab2(music_view, "queue"));
+    if (failed(r)) then {
+        toast("error", reason(r));
+    } else then {
+        toast("info", "Added to the queue.");
+    }
+    update_music();
+});
+
+grove::get_by_id("pl-add").on("click", [](grove::Event&: e) -> void {
+    auto: head = call("pl_view", music_view).split("\n")[0].split("\t");
+    string: name = "this playlist";
+    if (head.size() >= 3l) then {
+        name = head[2];
+    }
+    open_picker(music_view, "Adding to " + name);
+});
+
+grove::get_by_id("pl-group").on("click", [](grove::Event&: e) -> void {
+    grove::prompt_string("New folder", "Name for the folder inside this playlist:", "", [](string: name) -> void {
+        string: r = call("pl_group", tab2(music_view, name.trim()));
+        if (failed(r)) then {
+            toast("error", reason(r));
+            return;
+        }
+        build_music_list();
+        fill_playlists();
+    });
+});
+
+grove::get_by_id("pl-rename").on("click", [](grove::Event&: e) -> void {
+    auto: head = call("pl_view", music_view).split("\n")[0].split("\t");
+    string: current = "";
+    if (head.size() >= 3l) then {
+        current = head[2];
+    }
+    grove::prompt_string("Rename", "New name:", current, [](string: name) -> void {
+        string: r = call("pl_rename", tab2(music_view, name.trim()));
+        if (failed(r)) then {
+            toast("error", reason(r));
+            return;
+        }
+        build_music_list();
+        fill_playlists();
+    });
+});
+
+grove::get_by_id("pl-delete").on("click", [](grove::Event&: e) -> void {
+    auto: head = call("pl_view", music_view).split("\n")[0].split("\t");
+    string: name = "this";
+    if (head.size() >= 3l) then {
+        name = head[2];
+    }
+    grove::confirm("Delete", "Delete " + name + " and everything in it? Only the playlist goes; your music files stay where they are.", [](bool: yes) -> void {
+        if (!yes) then {
+            return;
+        }
+        string: r = call("pl_delete", music_view);
+        if (failed(r)) then {
+            toast("error", reason(r));
+            return;
+        }
+        string: parent = reason(r);
+        if (parent == "0" || parent.empty()) then {
+            open_music_view("queue");
+        } else then {
+            open_music_view(parent);
+        }
+    });
+});
+
+grove::get_by_id("mp-up").on("click", [](grove::Event&: e) -> void {
+    if (!mp_parent.empty()) then {
+        picker_dir(mp_parent);
+    }
+});
+
+grove::get_by_id("mp-go").on("click", [](grove::Event&: e) -> void {
+    picker_dir(grove::get_by_id("mp-path").value_string().trim());
+});
+
+grove::get_by_id("mp-path").on("key_down", [](grove::Event&: e) -> void {
+    if (e.key() == "Enter") then {
+        picker_dir(e.target().value_string().trim());
+        e.prevent_default();
+    }
+});
+
+grove::get_by_id("mp-add-picked").on("click", [](grove::Event&: e) -> void {
+    if (picker_count() == 0l) then {
+        set_text("mp-status", "Tick some folders or songs first.");
+        return;
+    }
+    picker_add(mp_selected);
+});
+
+grove::get_by_id("mp-add-folder").on("click", [](grove::Event&: e) -> void {
+    picker_add(mp_path);
+});
+
+grove::get_by_id("key-mtoggle").on("click", [](grove::Event&: e) -> void {
+    open_key_capture("mtoggle", "The key that plays or pauses the music.");
+});
+
+grove::get_by_id("key-mnext").on("click", [](grove::Event&: e) -> void {
+    open_key_capture("mnext", "The key that skips to the next song.");
+});
+
+grove::get_by_id("key-mprev").on("click", [](grove::Event&: e) -> void {
+    open_key_capture("mprev", "The key that goes back a song (or to the start of this one).");
+});
+
+grove::get_by_id("key-mtoggle-clear").on("click", [](grove::Event&: e) -> void {
+    call("set", tab2("key_music_toggle", ""));
+    load_settings_page();
+});
+
+grove::get_by_id("key-mnext-clear").on("click", [](grove::Event&: e) -> void {
+    call("set", tab2("key_music_next", ""));
+    load_settings_page();
+});
+
+grove::get_by_id("key-mprev-clear").on("click", [](grove::Event&: e) -> void {
+    call("set", tab2("key_music_previous", ""));
+    load_settings_page();
+});
+
 string: startup = call("settings", "");
 view_kind = setting(startup, "view");
 filling = true;
@@ -2039,6 +2868,12 @@ grove::set_interval(100.0, []() -> void {
     update_meters();
     if (grove::get_by_id("sounds").is_current()) then {
         update_states();
+    }
+});
+
+grove::set_interval(250.0, []() -> void {
+    if (grove::get_by_id("music").is_current()) then {
+        update_music();
     }
 });
 

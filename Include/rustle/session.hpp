@@ -7,6 +7,7 @@
 #include <rustle/files.hpp>
 #include <rustle/hotkeys.hpp>
 #include <rustle/library.hpp>
+#include <rustle/music.hpp>
 #include <rustle/settings.hpp>
 #include <rustle/virtual_mic.hpp>
 #include <rustle/voice.hpp>
@@ -45,6 +46,25 @@ struct RouteStatus {
     StreamStatus send;
     StreamStatus monitor;
     std::string send_label;
+};
+
+enum class MusicState {
+    stopped,
+    loading,
+    playing,
+    paused
+};
+
+std::string music_state_name(MusicState state);
+
+struct MusicNow {
+    MusicState state = MusicState::stopped;
+    std::uint64_t id = 0;
+    std::string path;
+    std::string name;
+    std::string folder;
+    double position = 0.0;
+    double length = 0.0;
 };
 
 struct Notice {
@@ -120,6 +140,36 @@ public:
     void toggle_mic();
     void set_talking(bool held);
 
+    MusicQueue& music_queue() { return m_queue; }
+    const MusicQueue& music_queue() const { return m_queue; }
+    Playlists& playlists() { return m_playlists; }
+    const Playlists& playlists() const { return m_playlists; }
+    std::filesystem::path music_path() const;
+    std::filesystem::path playlists_path() const;
+    bool save_music(std::string* error = nullptr);
+    void music_changed();
+    std::uint64_t music_revision() const;
+    bool music_add(const std::string& path, std::string* error = nullptr);
+    bool music_add_paths(const std::vector<std::string>& paths, std::size_t& added, std::string* error = nullptr);
+    bool music_queue_playlist(std::uint64_t id, bool replace, bool play, bool shuffle, std::string* error = nullptr);
+    bool music_play(std::string* error = nullptr);
+    void music_pause();
+    bool music_toggle(std::string* error = nullptr);
+    void music_stop();
+    bool music_next(std::string* error = nullptr);
+    bool music_previous(std::string* error = nullptr);
+    bool music_jump(std::uint64_t id, std::string* error = nullptr);
+    bool music_seek(double seconds);
+    bool music_remove(std::uint64_t id);
+    bool music_move(std::uint64_t id, int delta);
+    void music_clear();
+    std::size_t music_clear_played();
+    void set_music_shuffle(bool on);
+    void set_music_repeat(RepeatMode mode);
+    RepeatMode music_repeat() const;
+    void apply_music_levels();
+    MusicNow music_now() const;
+
     std::string control_command(const std::string& line);
     bool control_running() const { return m_control.running(); }
 
@@ -133,6 +183,12 @@ private:
     void probe_durations();
     bool start_play(const std::string& path, const ClipEdit& edit, bool count, std::string* error);
     void record_play(const std::string& path);
+
+    void load_music();
+    void start_music(std::uint64_t id, double at, bool paused);
+    void music_tick();
+    void music_finished();
+    std::string control_music(const std::string& cmd, const std::string& rest);
 
     void queue_key(const std::string& action, bool pressed);
     void run_action(const std::string& action, bool pressed);
@@ -171,7 +227,24 @@ private:
     std::chrono::steady_clock::time_point m_last_scan_check;
     std::chrono::steady_clock::time_point m_last_heal;
     std::chrono::steady_clock::time_point m_last_save;
+    std::chrono::steady_clock::time_point m_last_music_save;
     bool m_dirty = false;
+
+    MusicQueue m_queue;
+    Playlists m_playlists;
+    MusicState m_music_state = MusicState::stopped;
+    std::uint64_t m_music_id = 0;
+    std::string m_music_path;
+    std::string m_music_name;
+    std::uint64_t m_music_ticket = 0;
+    std::uint64_t m_music_epoch = 0;
+    double m_music_at = 0.0;
+    double m_music_length = 0.0;
+    bool m_music_failed = false;
+    std::string m_music_error;
+    int m_music_failures = 0;
+    bool m_music_dirty = false;
+    std::uint64_t m_music_rev = 1;
     bool m_audio_down = false;
 };
 

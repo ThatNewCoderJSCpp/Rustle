@@ -10,6 +10,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <new>
 #include <random>
 #include <string>
@@ -1074,6 +1075,271 @@ void test_session() {
     }
 }
 
+void test_music_model() {
+    CHECK(rustle::natural_less("track 2", "track 10") && !rustle::natural_less("track 10", "track 2"));
+    CHECK(rustle::natural_less("01 a", "2 b") && rustle::natural_less("Alpha", "beta") && !rustle::natural_less("b", "A"));
+    CHECK(rustle::repeat_from("ALL") == rustle::RepeatMode::all && rustle::repeat_from("one") == rustle::RepeatMode::one && rustle::repeat_from("x") == rustle::RepeatMode::off);
+    for (int i = 0; i < 200; ++i) {
+        const std::uint64_t r = rustle::secure_random_below(7);
+        CHECK(r < 7);
+        if (r >= 7) break;
+    }
+    CHECK(rustle::secure_random_below(1) == 0 && rustle::secure_random_below(0) == 0);
+
+    const fs::path album = temp_root() / "music" / "Album";
+    write_wav(album / "10 ten.wav", sine(300.0, 0.05));
+    write_wav(album / "02 two.wav", sine(300.0, 0.05));
+    write_wav(album / "01 one.wav", sine(300.0, 0.05));
+    write_wav(album / "Bonus" / "b side.wav", sine(300.0, 0.05));
+    fs::create_directories(album / "Empty");
+    std::ofstream(album / "notes.txt") << "not music";
+    write_wav(album / ".hidden" / "secret.wav", sine(300.0, 0.05));
+    const fs::path single = temp_root() / "music" / "single.wav";
+    write_wav(single, sine(300.0, 0.05));
+
+    rustle::MusicNode folder;
+    std::string why;
+    CHECK(rustle::expand_music_folder(album.string(), folder, &why));
+    CHECK(folder.kind == rustle::MusicKind::folder && folder.name == "Album" && folder.song_count() == 4);
+    CHECK(folder.children.size() == 4 && folder.children[0].name == "01 one" && folder.children[1].name == "02 two" && folder.children[2].name == "10 ten");
+    CHECK(folder.children[3].kind == rustle::MusicKind::folder && folder.children[3].name == "Bonus");
+    CHECK(!rustle::expand_music_folder((album / "Empty").string(), folder, &why) && !why.empty());
+    rustle::MusicNode node;
+    CHECK(!rustle::music_node_for_path((album / "notes.txt").string(), node, &why));
+    CHECK(rustle::music_node_for_path(single.string(), node, &why) && node.kind == rustle::MusicKind::song && node.name == "single");
+
+    auto names = [](rustle::MusicQueue& q, bool shuffle, rustle::RepeatMode repeat, int limit) {
+        std::vector<std::string> out;
+        for (int i = 0; i < limit; ++i) {
+            const std::uint64_t id = q.next(shuffle, repeat);
+            if (!id) break;
+            out.push_back(q.find(id)->name);
+        }
+        return out;
+    };
+
+    {
+        rustle::MusicQueue q;
+        rustle::MusicNode f;
+        rustle::expand_music_folder(album.string(), f);
+        const std::uint64_t fid = q.add(f);
+        const std::uint64_t sid = q.add(rustle::music_song(single.string()));
+        CHECK(fid && sid && q.song_count() == 5 && q.played_count() == 0);
+        const std::vector<std::string> order = names(q, false, rustle::RepeatMode::off, 20);
+        CHECK(order == std::vector<std::string>({ "01 one", "02 two", "10 ten", "b side", "single" }));
+        CHECK(q.played_count() == 5 && q.next(false, rustle::RepeatMode::off) == 0);
+        CHECK(q.previous() != 0 && q.find(q.current())->name == "b side");
+        CHECK(q.previous() != 0 && q.find(q.current())->name == "10 ten");
+        CHECK(q.has_forward() && q.find(q.next(false, rustle::RepeatMode::off))->name == "b side");
+        CHECK(q.find(q.next(false, rustle::RepeatMode::off))->name == "single" && !q.has_forward());
+        const std::vector<std::string> again = names(q, false, rustle::RepeatMode::all, 3);
+        CHECK(again == std::vector<std::string>({ "01 one", "02 two", "10 ten" }));
+        CHECK(q.played_count() == 3);
+
+        const std::uint64_t jumped = q.jump(fid, false);
+        CHECK(jumped && q.find(jumped)->name == "b side");
+        CHECK(q.find(q.next(false, rustle::RepeatMode::off))->name == "single");
+        CHECK(q.next(false, rustle::RepeatMode::off) == 0);
+
+        const rustle::Json saved = q.to_json();
+        rustle::MusicQueue back;
+        CHECK(back.from_json(saved) && back.song_count() == 5 && back.played_count() == 5);
+        CHECK(back.current() && back.find(back.current())->name == "single");
+        back.reset_played();
+        CHECK(back.played_count() == 0);
+
+        CHECK(q.clear_played() == 4 && q.song_count() == 1 && q.find(q.current()) && q.items().size() == 1);
+        CHECK(q.remove(q.current()) && q.empty() && q.current() == 0);
+    }
+
+    {
+        rustle::MusicQueue q;
+        rustle::MusicNode f;
+        rustle::expand_music_folder(album.string(), f);
+        q.add(f);
+        q.add(rustle::music_song(single.string()));
+        q.add(rustle::music_song(single.string()));
+        const std::vector<std::string> picked = names(q, true, rustle::RepeatMode::off, 50);
+        CHECK(picked.size() == 6 && q.played_count() == 6 && q.next(true, rustle::RepeatMode::off) == 0);
+        std::vector<std::string> sorted = picked;
+        std::sort(sorted.begin(), sorted.end());
+        CHECK(sorted == std::vector<std::string>({ "01 one", "02 two", "10 ten", "b side", "single", "single" }));
+        const std::uint64_t last = q.current();
+        const std::uint64_t first = q.next(true, rustle::RepeatMode::all);
+        CHECK(first != 0 && first != last && q.played_count() == 1);
+    }
+
+    {
+        rustle::MusicQueue q;
+        std::vector<std::uint64_t> asked;
+        q.set_random([&asked](std::uint64_t n) {
+            asked.push_back(n);
+            return n - 1;
+        });
+        rustle::MusicNode f;
+        rustle::expand_music_folder(album.string(), f);
+        q.add(f);
+        q.add(rustle::music_song(single.string()));
+        CHECK(q.find(q.next(true, rustle::RepeatMode::off))->name == "single" && asked.size() == 1 && asked[0] == 2);
+        asked.clear();
+        CHECK(q.find(q.next(true, rustle::RepeatMode::off))->name == "b side");
+        CHECK(asked.size() == 3 && asked[0] == 1 && asked[1] == 4 && asked[2] == 1);
+        asked.clear();
+        CHECK(q.find(q.next(true, rustle::RepeatMode::off))->name == "10 ten" && asked.size() == 2 && asked[1] == 3);
+        q.set_random([](std::uint64_t) { return 0; });
+        CHECK(q.find(q.next(true, rustle::RepeatMode::off))->name == "01 one");
+        CHECK(q.find(q.next(true, rustle::RepeatMode::off))->name == "02 two");
+        CHECK(q.next(true, rustle::RepeatMode::off) == 0);
+    }
+
+    {
+        rustle::Playlists lists;
+        const std::uint64_t chill = lists.create("Chill", &why);
+        CHECK(chill && lists.is_playlist(chill));
+        CHECK(!lists.create("chill", &why) && why.find("already") != std::string::npos);
+        CHECK(!lists.create("   ", &why));
+        const std::uint64_t sub = lists.add_group(chill, "Late night", &why);
+        CHECK(sub && !lists.is_playlist(sub) && lists.parent_of(sub) == chill);
+        const std::uint64_t f = lists.add_path(sub, album.string(), &why);
+        CHECK(f && lists.find(f)->kind == rustle::MusicKind::folder && lists.find(f)->children.empty());
+        CHECK(!lists.add_path(sub, album.string(), &why));
+        const std::uint64_t s1 = lists.add_path(chill, single.string(), &why);
+        CHECK(s1 && !lists.add_path(s1, single.string(), &why));
+        CHECK(!lists.add_path(chill, (album / "notes.txt").string(), &why));
+        const auto crumbs = lists.crumbs(f);
+        CHECK(crumbs.size() == 3 && crumbs[0].second == "Chill" && crumbs[1].second == "Late night" && crumbs[2].second == "Album");
+        CHECK(lists.move(s1, -5) && lists.find(chill)->children.front().id == s1);
+        CHECK(lists.rename(sub, "Late", &why) && lists.find(sub)->name == "Late");
+        const std::uint64_t gym = lists.create("Gym", &why);
+        CHECK(!lists.rename(gym, "CHILL", &why));
+        CHECK(lists.find_by_name("gym") == gym && lists.find_by_name("chi") == chill && lists.find_by_name("nope") == 0);
+        rustle::MusicNode expanded;
+        CHECK(lists.expanded(chill, expanded, &why) && expanded.song_count() == 5);
+        CHECK(!lists.expanded(gym, expanded, &why));
+        const rustle::Json j = lists.to_json();
+        rustle::Playlists back;
+        CHECK(back.from_json(j) && back.lists().size() == 2);
+        const std::uint64_t again = back.find_by_name("Chill");
+        CHECK(again && back.find(again)->children.size() == 2 && back.find(again)->song_count() == 1);
+        CHECK(back.expanded(again, expanded, &why) && expanded.song_count() == 5);
+        CHECK(lists.remove(sub) && lists.find(chill)->children.size() == 1);
+        CHECK(lists.remove(gym) && lists.lists().size() == 1);
+    }
+}
+
+void drive_music(rustle::Session& s, int blocks) {
+    std::vector<float> buf(480 * 2);
+    for (int i = 0; i < blocks; ++i) {
+        s.engine().render_send(buf.data(), 480);
+        s.engine().render_monitor(buf.data(), 480);
+        if (i % 4 == 0) {
+            s.tick();
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+    }
+}
+
+bool wait_music(rustle::Session& s, const std::function<bool()>& done, int seconds = 10) {
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(seconds);
+    while (std::chrono::steady_clock::now() < deadline) {
+        if (done()) return true;
+        drive_music(s, 8);
+    }
+    return done();
+}
+
+void test_session_music() {
+    const fs::path cfg = temp_root() / "music-config";
+    const fs::path mix = temp_root() / "music-session" / "Mix";
+    write_wav(mix / "a.wav", sine(440.0, 0.3, 44100, 2));
+    write_wav(mix / "b.wav", sine(550.0, 0.3));
+    write_wav(mix / "c.wav", sine(660.0, 5.0));
+    rustle::SessionOptions o;
+    o.config_dir = cfg;
+    o.audio = false;
+    o.virtual_mic = false;
+    o.hotkeys = false;
+    o.control = false;
+    std::string why;
+    {
+        rustle::Session s(o);
+        s.open();
+        CHECK(!s.music_play(&why) && !why.empty());
+        CHECK(s.music_add(mix.string(), &why));
+        CHECK(!s.music_add((mix / "nothing.wav").string(), &why));
+        CHECK(s.music_queue().song_count() == 3);
+        CHECK(s.music_play(&why));
+        CHECK(wait_music(s, [&] { return s.music_now().state == rustle::MusicState::playing; }));
+        CHECK(s.music_now().name == "a" && s.music_now().length > 0.25 && s.music_now().folder == "Mix");
+        CHECK(wait_music(s, [&] { return s.music_now().name == "b" && s.music_now().state == rustle::MusicState::playing; }));
+        CHECK(wait_music(s, [&] { return s.music_now().name == "c" && s.music_now().state == rustle::MusicState::playing; }));
+        drive_music(s, 20);
+        s.music_pause();
+        CHECK(s.music_now().state == rustle::MusicState::paused);
+        const double held = s.music_now().position;
+        drive_music(s, 40);
+        CHECK(std::fabs(s.music_now().position - held) < 0.02);
+        CHECK(s.music_play(&why) && s.music_now().state == rustle::MusicState::playing);
+        CHECK(s.music_seek(4.0));
+        CHECK(wait_music(s, [&] { return s.music_now().position >= 4.0; }));
+        CHECK(s.music_previous(&why) && wait_music(s, [&] { return s.music_now().position < 1.0; }));
+        CHECK(s.music_now().name == "c");
+        CHECK(s.music_previous(&why) && wait_music(s, [&] { return s.music_now().name == "b" && s.music_now().state == rustle::MusicState::playing; }));
+        CHECK(s.music_next(&why) && wait_music(s, [&] { return s.music_now().name == "c" && s.music_now().state == rustle::MusicState::playing; }));
+        CHECK(!s.music_next(&why) && s.music_now().state == rustle::MusicState::stopped);
+        CHECK(s.control_command("music-repeat one") == "ok\trepeat one" && s.music_repeat() == rustle::RepeatMode::one);
+        CHECK(s.control_command("music-repeat") == "ok\trepeat off");
+        CHECK(s.control_command("music-shuffle on") == "ok\tshuffle on" && s.settings().music_shuffle);
+        CHECK(s.control_command("music-shuffle") == "ok\tshuffle off");
+        CHECK(s.control_command("music-status").compare(0, 2, "ok") == 0);
+        CHECK(s.control_command("music-dance").compare(0, 5, "error") == 0);
+
+        CHECK(s.music_jump(s.music_queue().items().front().id, &why));
+        CHECK(wait_music(s, [&] { return s.music_now().name == "a" && s.music_now().state == rustle::MusicState::playing; }));
+        s.settings().music_repeat = "one";
+        CHECK(wait_music(s, [&] { return s.music_now().position > 0.1; }));
+        drive_music(s, 60);
+        CHECK(s.music_now().name == "a");
+        s.settings().music_repeat = "off";
+        s.stop_all();
+        CHECK(s.music_now().state == rustle::MusicState::playing || s.music_now().state == rustle::MusicState::loading);
+        CHECK(s.control_command("music-toggle") == "ok\tmusic paused");
+        CHECK(s.music_now().state == rustle::MusicState::paused);
+
+        const std::uint64_t pl = s.playlists().create("Road trip", &why);
+        const std::uint64_t sub = s.playlists().add_group(pl, "Side B", &why);
+        CHECK(s.playlists().add_path(sub, (mix / "c.wav").string(), &why) && s.playlists().add_path(pl, mix.string(), &why));
+        s.music_changed();
+        CHECK(s.control_command("music-shuffle-playlist road").compare(0, 2, "ok") == 0);
+        CHECK(s.settings().music_shuffle && s.music_queue().items().size() == 1 && s.music_queue().song_count() == 4);
+        CHECK(wait_music(s, [&] { return s.music_now().state == rustle::MusicState::playing; }));
+        CHECK(s.music_queue_playlist(pl, false, false, false, &why) && s.music_queue().song_count() == 8);
+        s.settings().music_volume = 0.0f;
+        s.apply_music_levels();
+        std::vector<float> out(480 * 2);
+        drive_music(s, 4);
+        s.engine().render_monitor(out.data(), 480);
+        CHECK(rms(out.data(), out.size()) < 1e-6);
+        CHECK(s.music_clear_played() == 0 && s.music_queue().song_count() == 8 && s.music_queue().played_count() >= 1);
+        s.music_pause();
+        s.close();
+    }
+    CHECK(fs::exists(cfg / "music.json") && fs::exists(cfg / "playlists.json"));
+    {
+        rustle::Session again(o);
+        again.open();
+        CHECK(again.playlists().lists().size() == 1 && again.playlists().lists()[0].name == "Road trip");
+        CHECK(again.music_queue().song_count() >= 4);
+        const rustle::MusicNow n = again.music_now();
+        CHECK(n.state == rustle::MusicState::paused && !n.name.empty());
+        CHECK(again.music_play(&why));
+        CHECK(wait_music(again, [&] { return again.music_now().state == rustle::MusicState::playing; }));
+        again.music_clear();
+        CHECK(again.music_queue().empty() && again.music_now().state == rustle::MusicState::stopped);
+        again.close();
+    }
+}
+
 void test_control_socket() {
 #if !defined(_WIN32)
     const std::string path = (temp_root() / "ctl.sock").string();
@@ -1111,6 +1377,8 @@ int main() {
     test_engine_null_backend();
     test_chords();
     test_session();
+    test_music_model();
+    test_session_music();
     test_control_socket();
     std::error_code ec;
     fs::remove_all(temp_root(), ec);

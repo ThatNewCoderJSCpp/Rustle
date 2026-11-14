@@ -77,11 +77,15 @@ add_library(rustle_core STATIC
     Source/rustle/virtual_mic.cpp
     Source/rustle/hotkeys.cpp
     Source/rustle/control.cpp
+    Source/rustle/music.cpp
     Source/rustle/session.cpp)
 add_library(rustle::core ALIAS rustle_core)
 target_compile_features(rustle_core PUBLIC cxx_std_17)
 target_include_directories(rustle_core PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/Include")
 target_link_libraries(rustle_core PUBLIC ${RUSTLE_FIZMO_AUDIO} ${CMAKE_DL_LIBS})
+if(TARGET fizmo::random)
+    target_link_libraries(rustle_core PUBLIC fizmo::random)
+endif()
 target_compile_definitions(rustle_core PUBLIC "RUSTLE_VERSION_STRING=\"${PROJECT_VERSION}\"")
 find_package(Threads REQUIRED)
 target_link_libraries(rustle_core PUBLIC Threads::Threads)

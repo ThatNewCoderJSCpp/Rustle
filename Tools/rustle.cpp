@@ -177,6 +177,42 @@ bool set_edit_value(rustle::ClipEdit& e, const std::string& key, const std::stri
     return true;
 }
 
+std::string clock_text(double seconds) {
+    if (!(seconds > 0.0)) return "0:00";
+    const long total = static_cast<long>(std::floor(seconds));
+    const long h = total / 3600;
+    const long m = (total / 60) % 60;
+    const long sec = total % 60;
+    char buf[40];
+    if (h > 0) std::snprintf(buf, sizeof(buf), "%ld:%02ld:%02ld", h, m, sec);
+    else std::snprintf(buf, sizeof(buf), "%ld:%02ld", m, sec);
+    return buf;
+}
+
+std::uint64_t to_id(const std::string& s) {
+    return std::strtoull(s.c_str(), nullptr, 10);
+}
+
+std::string songs_text(std::size_t n) {
+    return n == 1 ? std::string("1 song") : std::to_string(n) + " songs";
+}
+
+std::string music_detail(const rustle::MusicNode& n) {
+    if (n.kind == rustle::MusicKind::song) return std::string();
+    const std::size_t total = n.song_count();
+    const std::size_t played = n.played_count();
+    if (played == 0) return songs_text(total);
+    return std::to_string(played) + " of " + std::to_string(total) + " played";
+}
+
+bool holds_song(const rustle::MusicNode& n, std::uint64_t id) {
+    if (n.id == id) return true;
+    for (const rustle::MusicNode& c : n.children) {
+        if (holds_song(c, id)) return true;
+    }
+    return false;
+}
+
 const char* k_edit_keys[] = { "volume", "speed", "tempo", "pitch", "reverse", "reverb", "reverb_size", "trim_start", "trim_end", "fade_in", "fade_out", "loop" };
 
 class App {
@@ -330,6 +366,15 @@ private:
         put("key_mic_toggle", s.key_mic_toggle);
         put("key_push_to_talk", s.key_push_to_talk);
         put("voice_preset", s.voice_preset);
+        put("key_music_toggle", s.key_music_toggle);
+        put("key_music_next", s.key_music_next);
+        put("key_music_previous", s.key_music_previous);
+        put("music_volume", number(s.music_volume, 2));
+        put("music_to_others", s.music_to_others ? "1" : "0");
+        put("music_to_me", s.music_to_me ? "1" : "0");
+        put("music_shuffle", s.music_shuffle ? "1" : "0");
+        put("music_repeat", s.music_repeat);
+        put("music_browser_path", s.music_browser_path.empty() ? rustle::home_folder() : s.music_browser_path);
         put("config_dir", m_session.settings_path().parent_path().string());
         put("control_socket", rustle::control_supported() ? rustle::control_socket_path() : std::string());
         put("control_running", m_session.control_running() ? "1" : "0");
@@ -415,16 +460,30 @@ private:
         } else if (key == "global_hotkeys") {
             s.global_hotkeys = on;
             m_session.apply_hotkeys();
-        } else if (key == "key_stop_all" || key == "key_mic_toggle" || key == "key_push_to_talk") {
+        } else if (key == "key_stop_all" || key == "key_mic_toggle" || key == "key_push_to_talk" || key == "key_music_toggle" || key == "key_music_next" || key == "key_music_previous") {
             const std::string chord = value.empty() ? std::string() : rustle::normalize_chord(value);
             if (!value.empty() && chord.empty()) return "error\t" + value + " isn't a key Rustle knows";
             const std::string owner = chord.empty() ? std::string() : m_session.chord_owner(chord);
-            const std::string mine = key == "key_stop_all" ? "stop-all" : key == "key_mic_toggle" ? "toggle-mic" : "ptt";
+            const std::string mine = key == "key_stop_all" ? "stop-all" : key == "key_mic_toggle" ? "toggle-mic" : key == "key_push_to_talk" ? "ptt" : key == "key_music_toggle" ? "music-toggle" : key == "key_music_next" ? "music-next" : "music-previous";
             if (!owner.empty() && owner != mine) return "error\t" + chord + " is already used for something else";
             if (key == "key_stop_all") s.key_stop_all = chord;
             else if (key == "key_mic_toggle") s.key_mic_toggle = chord;
-            else s.key_push_to_talk = chord;
+            else if (key == "key_push_to_talk") s.key_push_to_talk = chord;
+            else if (key == "key_music_toggle") s.key_music_toggle = chord;
+            else if (key == "key_music_next") s.key_music_next = chord;
+            else s.key_music_previous = chord;
             m_session.apply_hotkeys();
+        } else if (key == "music_volume") {
+            s.music_volume = static_cast<float>(std::clamp(to_number(value, 0.7), 0.0, 2.0));
+            levels = true;
+        } else if (key == "music_to_others") {
+            s.music_to_others = on;
+            levels = true;
+        } else if (key == "music_to_me") {
+            s.music_to_me = on;
+            levels = true;
+        } else if (key == "music_browser_path") {
+            s.music_browser_path = value;
         } else {
             return "error\tno setting called " + key;
         }
@@ -762,11 +821,192 @@ private:
         native("home", [](const std::vector<std::string>&) { return rustle::home_folder(); });
     }
 
+    void queue_rows(const std::vector<rustle::MusicNode>& list, std::uint64_t parent, int depth, const std::string& open, std::uint64_t now, std::string& out, std::size_t& rows) {
+        for (std::size_t i = 0; i < list.size(); ++i) {
+            const rustle::MusicNode& n = list[i];
+            if (rows >= 1500) {
+                out += row({ "more", std::to_string(depth), std::to_string(list.size() - i) });
+                return;
+            }
+            const bool expanded = n.container() && open.find("|" + std::to_string(n.id) + "|") != std::string::npos;
+            const bool here = n.kind == rustle::MusicKind::song ? n.id == now : holds_song(n, now);
+            const bool done = n.kind == rustle::MusicKind::song ? n.played : n.remaining() == 0;
+            out += row({ "item", std::to_string(n.id), std::to_string(depth * 22 + 8), rustle::music_kind_name(n.kind), n.name, music_detail(n), done ? "1" : "0", here ? "1" : "0",
+                expanded ? "1" : "0", std::to_string(parent), i == 0 ? "1" : "0", i + 1 == list.size() ? "1" : "0" });
+            ++rows;
+            if (expanded) queue_rows(n.children, n.id, depth + 1, open, now, out, rows);
+        }
+    }
+
+    std::string playlist_view(std::uint64_t id) {
+        const rustle::Playlists& lists = m_session.playlists();
+        const rustle::MusicNode* n = lists.find(id);
+        if (!n || n->kind != rustle::MusicKind::group) return "error\tthat playlist isn't there any more";
+        std::string out = row({ "head", std::to_string(n->id), n->name, lists.is_playlist(id) ? "1" : "0", std::to_string(lists.parent_of(id)), songs_text(n->song_count()) });
+        for (const auto& c : lists.crumbs(id)) out += row({ "crumb", std::to_string(c.first), c.second });
+        for (std::size_t i = 0; i < n->children.size(); ++i) {
+            const rustle::MusicNode& c = n->children[i];
+            std::string detail;
+            if (c.kind == rustle::MusicKind::group) detail = c.children.size() == 1 ? std::string("1 item") : std::to_string(c.children.size()) + " items";
+            else if (c.kind == rustle::MusicKind::folder) detail = c.path;
+            else detail = fs::path(c.path).parent_path().filename().string();
+            std::error_code ec;
+            const bool missing = c.kind != rustle::MusicKind::group && !fs::exists(c.path, ec);
+            out += row({ "item", std::to_string(c.id), rustle::music_kind_name(c.kind), c.name, detail, missing ? "1" : "0", i == 0 ? "1" : "0", i + 1 == n->children.size() ? "1" : "0" });
+        }
+        return out;
+    }
+
+    void register_music_natives() {
+        native("music_now", [this](const std::vector<std::string>&) {
+            const rustle::MusicNow n = m_session.music_now();
+            const rustle::Settings& s = m_session.settings();
+            const rustle::MusicQueue& q = m_session.music_queue();
+            return single(row({ rustle::music_state_name(n.state), std::to_string(n.id), n.name, n.folder, clock_text(n.position), clock_text(n.length), number(n.position, 2),
+                number(n.length, 2), s.music_shuffle ? "1" : "0", s.music_repeat, std::to_string(q.played_count()), std::to_string(q.song_count()),
+                std::to_string(m_session.music_revision()), number(s.music_volume, 2), s.music_to_others ? "1" : "0", s.music_to_me ? "1" : "0" }));
+        });
+        native("music_queue", [this](const std::vector<std::string>& f) {
+            std::string out;
+            std::size_t rows = 0;
+            queue_rows(m_session.music_queue().items(), 0, 0, "|" + arg(f, 0) + "|", m_session.music_now().id, out, rows);
+            return out;
+        });
+        native("music_play", [this](const std::vector<std::string>&) {
+            std::string why;
+            return m_session.music_play(&why) ? std::string("ok") : "error\t" + clean(why);
+        });
+        native("music_pause", [this](const std::vector<std::string>&) {
+            m_session.music_pause();
+            return std::string("ok");
+        });
+        native("music_toggle", [this](const std::vector<std::string>&) {
+            std::string why;
+            return m_session.music_toggle(&why) ? std::string("ok") : "error\t" + clean(why);
+        });
+        native("music_next", [this](const std::vector<std::string>&) {
+            std::string why;
+            return m_session.music_next(&why) ? std::string("ok") : "error\t" + clean(why);
+        });
+        native("music_prev", [this](const std::vector<std::string>&) {
+            std::string why;
+            return m_session.music_previous(&why) ? std::string("ok") : "error\t" + clean(why);
+        });
+        native("music_stop", [this](const std::vector<std::string>&) {
+            m_session.music_stop();
+            return std::string("ok");
+        });
+        native("music_seek", [this](const std::vector<std::string>& f) {
+            return m_session.music_seek(to_number(arg(f, 0), 0.0)) ? std::string("ok") : std::string("error\tnothing to seek in");
+        });
+        native("music_jump", [this](const std::vector<std::string>& f) {
+            std::string why;
+            return m_session.music_jump(to_id(arg(f, 0)), &why) ? std::string("ok") : "error\t" + clean(why);
+        });
+        native("music_remove", [this](const std::vector<std::string>& f) {
+            return m_session.music_remove(to_id(arg(f, 0))) ? std::string("ok") : std::string("error\tthat isn't in the queue any more");
+        });
+        native("music_move", [this](const std::vector<std::string>& f) {
+            m_session.music_move(to_id(arg(f, 0)), static_cast<int>(to_number(arg(f, 1), 0.0)));
+            return std::string("ok");
+        });
+        native("music_clear", [this](const std::vector<std::string>&) {
+            m_session.music_clear();
+            return std::string("ok");
+        });
+        native("music_clear_played", [this](const std::vector<std::string>&) { return "ok\t" + std::to_string(m_session.music_clear_played()); });
+        native("music_shuffle", [this](const std::vector<std::string>& f) {
+            m_session.set_music_shuffle(truthy(arg(f, 0)));
+            return std::string("ok");
+        });
+        native("music_repeat", [this](const std::vector<std::string>& f) {
+            m_session.set_music_repeat(rustle::repeat_from(arg(f, 0)));
+            return "ok\t" + m_session.settings().music_repeat;
+        });
+        native("music_add", [this](const std::vector<std::string>& f) {
+            std::vector<std::string> paths;
+            for (const std::string& p : f) {
+                if (!p.empty()) paths.push_back(p);
+            }
+            if (paths.empty()) return std::string("error\tpick some music first");
+            std::size_t added = 0;
+            std::string why;
+            if (!m_session.music_add_paths(paths, added, &why)) return "error\t" + clean(why.empty() ? std::string("there's no music there") : why);
+            return "ok\t" + std::to_string(added) + "\t" + clean(why);
+        });
+        native("pl_list", [this](const std::vector<std::string>&) {
+            std::string out;
+            for (const rustle::MusicNode& p : m_session.playlists().lists()) {
+                std::size_t folders = 0;
+                for (const rustle::MusicNode& c : p.children) folders += c.kind == rustle::MusicKind::folder ? 1 : 0;
+                std::string detail = songs_text(p.song_count());
+                if (folders == 1) detail += " + 1 folder";
+                else if (folders > 1) detail += " + " + std::to_string(folders) + " folders";
+                out += row({ std::to_string(p.id), p.name, detail });
+            }
+            return out;
+        });
+        native("pl_view", [this](const std::vector<std::string>& f) { return playlist_view(to_id(arg(f, 0))); });
+        native("pl_create", [this](const std::vector<std::string>& f) {
+            std::string why;
+            const std::uint64_t id = m_session.playlists().create(arg(f, 0), &why);
+            if (!id) return "error\t" + clean(why);
+            m_session.music_changed();
+            return "ok\t" + std::to_string(id);
+        });
+        native("pl_rename", [this](const std::vector<std::string>& f) {
+            std::string why;
+            if (!m_session.playlists().rename(to_id(arg(f, 0)), arg(f, 1), &why)) return "error\t" + clean(why);
+            m_session.music_changed();
+            return std::string("ok");
+        });
+        native("pl_delete", [this](const std::vector<std::string>& f) {
+            const std::uint64_t id = to_id(arg(f, 0));
+            const std::uint64_t parent = m_session.playlists().parent_of(id);
+            if (!m_session.playlists().remove(id)) return std::string("error\tthat isn't there any more");
+            m_session.music_changed();
+            return "ok\t" + std::to_string(parent);
+        });
+        native("pl_group", [this](const std::vector<std::string>& f) {
+            std::string why;
+            const std::uint64_t id = m_session.playlists().add_group(to_id(arg(f, 0)), arg(f, 1), &why);
+            if (!id) return "error\t" + clean(why);
+            m_session.music_changed();
+            return "ok\t" + std::to_string(id);
+        });
+        native("pl_add", [this](const std::vector<std::string>& f) {
+            const std::uint64_t parent = to_id(arg(f, 0));
+            std::size_t added = 0;
+            std::string problems;
+            for (std::size_t i = 1; i < f.size(); ++i) {
+                if (f[i].empty()) continue;
+                std::string why;
+                if (m_session.playlists().add_path(parent, f[i], &why)) ++added;
+                else if (!why.empty()) problems += (problems.empty() ? "" : "; ") + why;
+            }
+            if (added) m_session.music_changed();
+            if (!added) return "error\t" + clean(problems.empty() ? std::string("pick some music first") : problems);
+            return "ok\t" + std::to_string(added) + "\t" + clean(problems);
+        });
+        native("pl_move", [this](const std::vector<std::string>& f) {
+            if (m_session.playlists().move(to_id(arg(f, 0)), static_cast<int>(to_number(arg(f, 1), 0.0)))) m_session.music_changed();
+            return std::string("ok");
+        });
+        native("pl_play", [this](const std::vector<std::string>& f) {
+            const std::string mode = arg(f, 1);
+            std::string why;
+            const bool queue_only = mode == "queue";
+            if (!m_session.music_queue_playlist(to_id(arg(f, 0)), !queue_only, !queue_only, mode == "shuffle", &why)) return "error\t" + clean(why);
+            return std::string("ok");
+        });
+    }
+
     void register_natives() {
         register_library_natives();
         register_audio_natives();
         register_voice_natives();
         register_file_natives();
+        register_music_natives();
     }
 
     grove::Document& m_doc;
@@ -1002,7 +1242,10 @@ void usage() {
                  "  voice            run a recording through the voice changer and save the result\n"
                  "  devices          list the sound devices Rustle can see\n"
                  "  ctl              tell the running Rustle to do something: stop-all, toggle-mic, mic-on, mic-off,\n"
-                 "                   ptt-down, ptt-up, play NAME, toggle NAME, stop NAME, preset NAME, voice-off, status\n\n"
+                 "                   ptt-down, ptt-up, play NAME, toggle NAME, stop NAME, preset NAME, voice-off, status,\n"
+                 "                   music-play, music-pause, music-toggle, music-next, music-prev, music-stop,\n"
+                 "                   music-shuffle [on|off], music-repeat [off|all|one], music-add PATH,\n"
+                 "                   music-playlist NAME, music-shuffle-playlist NAME, music-queue-playlist NAME, music-status\n\n"
                  "edits: --speed X --tempo X --pitch ST --reverse --reverb MIX --volume X --start S --end S\n\n"
                  "Set RUSTLE_UI_DIR to use a different UI folder, RUSTLE_CONFIG_DIR to keep settings somewhere else,\n"
                  "and FIZMO_AUDIO_BACKEND=null to run without a sound card.\n";

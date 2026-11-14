@@ -1,4 +1,5 @@
 #include <rustle/engine.hpp>
+#include <rustle/clip.hpp>
 
 #include <algorithm>
 #include <cmath>
@@ -50,12 +51,20 @@ void Engine::allocate(std::uint32_t rate) {
         std::lock_guard<std::mutex> lock(m_mutex);
         m_send_mixer = std::make_unique<fa::Mixer>(m_rate, 2);
         m_monitor_mixer = std::make_unique<fa::Mixer>(m_rate, 2);
+        m_music_send_mixer = std::make_unique<fa::Mixer>(m_rate, 2);
+        m_music_monitor_mixer = std::make_unique<fa::Mixer>(m_rate, 2);
+        m_music_send_mixer->set_master_gain(m_music_to_others ? m_music_gain : 0.0f);
+        m_music_monitor_mixer->set_master_gain(m_music_to_me ? m_music_gain : 0.0f);
         m_plays.clear();
+        m_music = Music();
+        ++m_epoch;
     }
     m_voice.prepare(m_rate, 1, k_chunk);
     m_mono.assign(k_chunk, 0.0f);
     m_send_voice.assign(k_chunk, 0.0f);
     m_hear_voice.assign(k_chunk, 0.0f);
+    m_music_send_mix.assign(k_chunk * 2, 0.0f);
+    m_music_monitor_mix.assign(k_chunk * 2, 0.0f);
     const std::size_t target = std::max<std::size_t>(256, static_cast<std::size_t>(m_rate) * 3 / 100);
     m_send_link.allocate(static_cast<std::size_t>(m_rate), target);
     m_hear_link.allocate(static_cast<std::size_t>(m_rate), target);
@@ -175,6 +184,7 @@ void Engine::stop() {
     m_offline = false;
     std::lock_guard<std::mutex> lock(m_mutex);
     m_plays.clear();
+    m_music = Music();
 }
 
 bool Engine::started() const {
@@ -330,6 +340,142 @@ std::vector<PlayingSound> Engine::playing() const {
     return out;
 }
 
+std::uint64_t Engine::epoch() const {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    return m_epoch;
+}
+
+void Engine::set_music_gains(float volume, bool to_others, bool to_me) {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    m_music_gain = volume;
+    m_music_to_others = to_others;
+    m_music_to_me = to_me;
+    if (m_music_send_mixer) m_music_send_mixer->set_master_gain(to_others ? volume : 0.0f);
+    if (m_music_monitor_mixer) m_music_monitor_mixer->set_master_gain(to_me ? volume : 0.0f);
+}
+
+void Engine::stop_music_locked(double fade) {
+    if (m_music.send && m_music_send_mixer) m_music_send_mixer->stop(m_music.send, fade);
+    if (m_music.monitor && m_music_monitor_mixer) m_music_monitor_mixer->stop(m_music.monitor, fade);
+    m_music = Music();
+}
+
+bool Engine::play_music(const std::string& path, double start, bool paused, std::string* error) {
+    bool want_send = false;
+    bool want_monitor = false;
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        if (!m_music_send_mixer || !m_music_monitor_mixer) {
+            if (error) *error = "the audio engine isn't running";
+            return false;
+        }
+        want_send = m_send_live.load();
+        want_monitor = m_monitor_live.load();
+    }
+    if (!want_send && !want_monitor) {
+        if (error) *error = "nothing is playing sound right now; check the Output page";
+        return false;
+    }
+    std::unique_ptr<fa::AudioReader> send_reader;
+    std::unique_ptr<fa::AudioReader> monitor_reader;
+    std::string why;
+    bool streamed = true;
+    double length = 0.0;
+    if (want_send) {
+        send_reader = std::make_unique<fa::AudioReader>();
+        if (!send_reader->open(path, &why)) streamed = false;
+        else length = send_reader->info().duration;
+    }
+    if (streamed && want_monitor) {
+        monitor_reader = std::make_unique<fa::AudioReader>();
+        if (!monitor_reader->open(path, &why)) streamed = false;
+        else if (length <= 0.0) length = monitor_reader->info().duration;
+    }
+    fa::Sound decoded;
+    if (!streamed) {
+        send_reader.reset();
+        monitor_reader.reset();
+        fa::AudioBuffer buffer;
+        std::string decode_why;
+        if (!decode_sound(path, buffer, &decode_why)) {
+            if (error) *error = decode_why.empty() ? why : decode_why;
+            return false;
+        }
+        std::uint32_t rate = 48000;
+        {
+            std::lock_guard<std::mutex> lock(m_mutex);
+            rate = m_rate;
+        }
+        if (buffer.sample_rate() != rate || buffer.channels() != 2) buffer = buffer.converted(2, rate);
+        decoded = fa::make_sound(std::move(buffer));
+        length = decoded->duration();
+    }
+    std::lock_guard<std::mutex> lock(m_mutex);
+    if (!m_music_send_mixer || !m_music_monitor_mixer) {
+        if (error) *error = "the audio engine stopped";
+        return false;
+    }
+    stop_music_locked(0.05);
+    fa::PlayOptions o;
+    o.paused = paused;
+    o.start = std::max(0.0, start);
+    o.fade_in = o.start > 0.0 ? 0.05 : 0.0;
+    Music m;
+    m.paused = paused;
+    m.streamed = streamed;
+    std::string play_why;
+    if (want_send && m_send_live.load()) {
+        m.send = streamed ? m_music_send_mixer->play_stream(std::move(send_reader), o, &play_why) : m_music_send_mixer->play(decoded, o);
+    }
+    if (want_monitor && m_monitor_live.load()) {
+        m.monitor = streamed ? m_music_monitor_mixer->play_stream(std::move(monitor_reader), o, &play_why) : m_music_monitor_mixer->play(decoded, o);
+    }
+    if (!m.send && !m.monitor) {
+        if (error) *error = play_why.empty() ? std::string("couldn't start playing") : play_why;
+        return false;
+    }
+    if (length <= 0.0) length = m.monitor ? m_music_monitor_mixer->duration(m.monitor) : m_music_send_mixer->duration(m.send);
+    m.length = length;
+    m_music = m;
+    return true;
+}
+
+void Engine::stop_music(double fade) {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    stop_music_locked(fade);
+}
+
+void Engine::set_music_paused(bool paused) {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    if (m_music.send && m_music_send_mixer) m_music_send_mixer->set_paused(m_music.send, paused);
+    if (m_music.monitor && m_music_monitor_mixer) m_music_monitor_mixer->set_paused(m_music.monitor, paused);
+    m_music.paused = paused;
+}
+
+bool Engine::seek_music(double seconds) {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    bool ok = false;
+    const double to = std::max(0.0, m_music.length > 0.0 ? std::min(seconds, m_music.length) : seconds);
+    if (m_music.send && m_music_send_mixer) ok = m_music_send_mixer->seek(m_music.send, to) || ok;
+    if (m_music.monitor && m_music_monitor_mixer) ok = m_music_monitor_mixer->seek(m_music.monitor, to) || ok;
+    return ok;
+}
+
+MusicStatus Engine::music_status() const {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    MusicStatus s;
+    s.epoch = m_epoch;
+    const bool a = m_music.send && m_music_send_mixer && m_send_live.load() && m_music_send_mixer->is_playing(m_music.send);
+    const bool b = m_music.monitor && m_music_monitor_mixer && m_monitor_live.load() && m_music_monitor_mixer->is_playing(m_music.monitor);
+    s.active = a || b;
+    if (!s.active) return s;
+    s.paused = m_music.paused;
+    s.streamed = m_music.streamed;
+    s.length = m_music.length;
+    s.position = b ? m_music_monitor_mixer->position(m_music.monitor) : m_music_send_mixer->position(m_music.send);
+    return s;
+}
+
 float Engine::take_mic_level() {
     return m_mic_peak.exchange(0.0f);
 }
@@ -394,6 +540,11 @@ void Engine::render_send(float* output, std::size_t frames) noexcept {
         const std::size_t n = std::min(m_send_voice.size(), frames - done);
         float* out = output + done * 2;
         m_send_mixer->render(out, n);
+        if (m_music_send_mixer) {
+            float* music = m_music_send_mix.data();
+            m_music_send_mixer->render(music, n);
+            for (std::size_t i = 0; i < n * 2; ++i) out[i] += music[i];
+        }
         if (voice) {
             m_send_link.read(m_send_voice.data(), n);
             const float g = m_mic_gain.load(std::memory_order_relaxed);
@@ -419,6 +570,11 @@ void Engine::render_monitor(float* output, std::size_t frames) noexcept {
         const std::size_t n = std::min(m_hear_voice.size(), frames - done);
         float* out = output + done * 2;
         m_monitor_mixer->render(out, n);
+        if (m_music_monitor_mixer) {
+            float* music = m_music_monitor_mix.data();
+            m_music_monitor_mixer->render(music, n);
+            for (std::size_t i = 0; i < n * 2; ++i) out[i] += music[i];
+        }
         if (voice) {
             m_hear_link.read(m_hear_voice.data(), n);
             const float g = m_hear_gain.load(std::memory_order_relaxed);

@@ -75,6 +75,16 @@ struct Settings {
     std::string voice_json;
     std::string voice_preset;
 
+    float music_volume = 0.7f;
+    bool music_to_others = true;
+    bool music_to_me = true;
+    bool music_shuffle = false;
+    std::string music_repeat = "off";
+    std::string music_browser_path;
+    std::string key_music_toggle;
+    std::string key_music_next;
+    std::string key_music_previous;
+
     std::string to_json() const;
     bool from_json(const std::string& text, std::string* error = nullptr);
 

@@ -34,6 +34,15 @@ struct StreamStatus {
     std::string error;
 };
 
+struct MusicStatus {
+    bool active = false;
+    bool paused = false;
+    bool streamed = false;
+    double position = 0.0;
+    double length = 0.0;
+    std::uint64_t epoch = 0;
+};
+
 struct PlayingSound {
     std::uint64_t id = 0;
     std::string tag;
@@ -87,6 +96,14 @@ public:
     std::vector<PlayingSound> playing() const;
     bool tag_playing(const std::string& tag) const;
 
+    bool play_music(const std::string& path, double start, bool paused, std::string* error = nullptr);
+    void stop_music(double fade = 0.05);
+    void set_music_paused(bool paused);
+    bool seek_music(double seconds);
+    MusicStatus music_status() const;
+    void set_music_gains(float volume, bool to_others, bool to_me);
+    std::uint64_t epoch() const;
+
     float take_mic_level();
     float take_voice_level();
     float take_send_level();
@@ -108,7 +125,16 @@ private:
         bool loop = false;
     };
 
+    struct Music {
+        fizmo::audio::Mixer::VoiceId send = 0;
+        fizmo::audio::Mixer::VoiceId monitor = 0;
+        double length = 0.0;
+        bool paused = false;
+        bool streamed = false;
+    };
+
     void cleanup_locked() const;
+    void stop_music_locked(double fade);
     void allocate(std::uint32_t rate);
     void close_streams();
 
@@ -120,6 +146,8 @@ private:
     VoiceChain m_voice;
     std::unique_ptr<fizmo::audio::Mixer> m_send_mixer;
     std::unique_ptr<fizmo::audio::Mixer> m_monitor_mixer;
+    std::unique_ptr<fizmo::audio::Mixer> m_music_send_mixer;
+    std::unique_ptr<fizmo::audio::Mixer> m_music_monitor_mixer;
     std::atomic<bool> m_capture_live{ false };
     std::atomic<bool> m_send_live{ false };
     std::atomic<bool> m_monitor_live{ false };
@@ -136,6 +164,8 @@ private:
     std::vector<float> m_mono;
     std::vector<float> m_send_voice;
     std::vector<float> m_hear_voice;
+    std::vector<float> m_music_send_mix;
+    std::vector<float> m_music_monitor_mix;
 
     std::atomic<bool> m_mic_on{ true };
     std::atomic<bool> m_ptt{ false };
@@ -153,6 +183,11 @@ private:
     mutable std::mutex m_mutex;
     mutable std::map<std::uint64_t, Play> m_plays;
     std::uint64_t m_next = 1;
+    Music m_music;
+    std::uint64_t m_epoch = 0;
+    float m_music_gain = 0.7f;
+    bool m_music_to_others = true;
+    bool m_music_to_me = true;
 };
 
 std::vector<fizmo::audio::DeviceInfo> usable_devices(fizmo::audio::DeviceKind kind);
