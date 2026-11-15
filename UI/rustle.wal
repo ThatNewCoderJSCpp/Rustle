@@ -1,6 +1,7 @@
 import module.grove
 import module.strings
 import module.io
+import module.collections
 
 string: cur_folder = "";
 string: view_mode = "folder";
@@ -30,6 +31,11 @@ string: mp_path = "";
 string: mp_parent = "";
 string: mp_selected = "";
 string: mp_target = "queue";
+std::collections::Vector<string>: list_lines;
+long int: list_first = -1l;
+long int: list_last = -1l;
+short float: list_row_h = 0.0;
+long int: list_buffer = 25l;
 
 function call(const string&: name, const string&: arg) -> string;
 function el(const string&: tag, const string&: cls, const string&: label) -> grove::Element;
@@ -47,6 +53,8 @@ function setting(const string&: source, const string&: key) -> string;
 function toast(const string&: kind, const string&: msg) -> void;
 function update_notices() -> void;
 function build_board() -> void;
+function render_list(bool: force) -> void;
+function list_spacer(long int: rows, short float: row_h) -> grove::Element;
 function add_crumb(grove::Element&: box, const string&: label, const string&: path, bool: last) -> void;
 function folder_card(const string&: path, const string&: name, const string&: sounds, const string&: folders) -> grove::Element;
 function sound_tile(long int: index, const string&: line) -> grove::Element;
@@ -374,6 +382,9 @@ function build_board() -> void {
     clear(tiles);
     clear(list);
     clear(crumbs);
+    list_lines.resize(0l);
+    list_first = -1l;
+    list_last = -1l;
     active_list = "";
     long int: dirs = 0l;
     long int: sounds = 0l;
@@ -405,7 +416,7 @@ function build_board() -> void {
             dirs += 1l;
         } else if (f[0] == "sound" && f.size() >= 10l) then {
             if (view_kind == "list") then {
-                list.append_child(sound_row(sounds, rows[i]));
+                list_lines.push_back(rows[i]);
             } else then {
                 tiles.append_child(sound_tile(sounds, rows[i]));
             }
@@ -439,8 +450,104 @@ function build_board() -> void {
     } else if (view_mode == "recent") then {
         recent.add_class("primary");
     }
+    if (view_kind == "list") then {
+        render_list(true);
+    }
     update_states();
 } end function build_board
+
+function list_spacer(long int: rows, short float: row_h) -> grove::Element {
+    grove::Element: spacer = el("div", "list-spacer", "");
+    long int: px = static_cast<long int>(static_cast<short float>(rows) * row_h + 0.5);
+    spacer.set_style("height", px.to_string() + "px");
+    return spacer;
+} end function list_spacer
+
+function render_list(bool: force) -> void {
+    grove::Element: list = grove::get_by_id("list");
+    long int: total = list_lines.size();
+    if (total == 0l) then {
+        if (list.child_count() > 0l) then {
+            clear(list);
+        }
+        list_first = -1l;
+        list_last = -1l;
+        return;
+    }
+    grove::Element: board = grove::get_by_id("board");
+    bool: rebuild = force;
+    if (list_first >= 0l) then {
+        for (long int: c = 0l; c < list.child_count() && c < 3l; c += 1l) {
+            grove::Element: probe = list.child(c);
+            if (probe.has_class("sound-row") && probe.laid_out()) then {
+                short float: measured = probe.box_height();
+                if (measured > 1.0 && (measured - list_row_h > 0.5 || list_row_h - measured > 0.5)) then {
+                    list_row_h = measured;
+                    rebuild = true;
+                }
+                break;
+            }
+        }
+    }
+    short float: row_h = list_row_h;
+    if (row_h <= 1.0) then {
+        row_h = 34.0;
+    }
+    short float: scroll = board.scroll_top();
+    short float: view_h = board.box_height();
+    if (view_h <= 1.0) then {
+        view_h = 1200.0;
+    }
+    short float: list_top = 0.0;
+    if (list.laid_out() && board.laid_out()) then {
+        list_top = list.box_y() - board.box_y() + scroll;
+    }
+    short float: view_from = scroll - list_top;
+    short float: view_to = view_from + view_h;
+    long int: shown_first = 0l;
+    if (view_from > 0.0) then {
+        shown_first = static_cast<long int>(view_from / row_h);
+    }
+    long int: shown_last = 0l;
+    if (view_to > 0.0) then {
+        shown_last = static_cast<long int>(view_to / row_h) + 1l;
+    }
+    if (shown_first > total) then {
+        shown_first = total;
+    }
+    if (shown_last > total) then {
+        shown_last = total;
+    }
+    if (!rebuild && list_first >= 0l && shown_first >= list_first && shown_last <= list_last) then {
+        return;
+    }
+    long int: first = shown_first - list_buffer;
+    if (first < 0l) then {
+        first = 0l;
+    }
+    long int: last = shown_last + list_buffer;
+    if (last > total) then {
+        last = total;
+    }
+    if (!rebuild && first == list_first && last == list_last) then {
+        return;
+    }
+    clear(list);
+    if (first > 0l) then {
+        list.append_child(list_spacer(first, row_h));
+    }
+    for (long int: i = first; i < last; i += 1l) {
+        list.append_child(sound_row(i, list_lines[i]));
+    }
+    if (last < total) then {
+        list.append_child(list_spacer(total - last, row_h));
+    }
+    list_first = first;
+    list_last = last;
+    if (!force) then {
+        update_states();
+    }
+} end function render_list
 
 function enter_folder(const string&: path) -> void {
     cur_folder = path;
@@ -2864,9 +2971,24 @@ if (!start_page.empty()) then {
     grove::navigate(start_page);
 }
 
+grove::get_by_id("board").on("scroll", [](grove::Event&: e) -> void {
+    if (view_kind == "list") then {
+        render_list(false);
+    }
+});
+
+grove::document().on("resize", [](grove::Event&: e) -> void {
+    if (view_kind == "list") then {
+        render_list(false);
+    }
+});
+
 grove::set_interval(100.0, []() -> void {
     update_meters();
     if (grove::get_by_id("sounds").is_current()) then {
+        if (view_kind == "list") then {
+            render_list(false);
+        }
         update_states();
     }
 });
